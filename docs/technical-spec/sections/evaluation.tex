@@ -1,0 +1,56 @@
+\section{Evaluation}
+\label{sec:evaluation}
+
+Evaluation will determine whether an implementation computes the intended beams with acceptable accuracy and whether it provides a useful performance benefit. Comparisons will include all data movement required by each strategy, as well as the cost of gathering context and selecting a strategy.
+
+\subsection{Numerical Correctness}
+\label{sec:numerical-correctness}
+
+Every implementation will be compared against the double-precision reference using identical inputs and weights. Distributed implementations will additionally be compared against the single-GPU implementation at the same precision, so that errors introduced by distribution can be distinguished from those introduced by reduced precision.
+
+Accuracy will be measured using the relative error of the complete output,
+
+\[
+  \varepsilon_{\mathrm{rel}} =
+  \frac{\lVert Y_{\mathrm{candidate}} - Y_{\mathrm{reference}} \rVert_F}
+       {\lVert Y_{\mathrm{reference}} \rVert_F},
+\]
+
+where $\lVert\cdot\rVert_F$ is the Frobenius norm, together with the maximum elementwise error. Acceptable tolerances will be documented for each supported precision and justified relative to the precision of typical sensor data. Nonfinite values and integer overflow will be checked explicitly.
+
+Test inputs will include random data, synthetic plane-wave sources from known directions, for which the steered beam should recover the source with the expected gain, and boundary cases. Boundary cases will include dimensions that are not multiples of the tensor-core tile sizes, a single beam or sensor, and partitions in which dimensions are not divisible by the number of GPUs.
+
+\subsection{Performance Measurement}
+\label{sec:performance-measurement}
+
+Measurements will report throughput, latency, and scaling efficiency. Throughput will be expressed in terms of the workload processed, such as sample blocks or beam samples per second, and as achieved floating-point or integer operations per second relative to the hardware peak. Latency per sample block will also be reported, since some applications require beams to be produced within a fixed time.
+
+For a configuration using $P$ GPUs with execution time $T_P$, and a single-GPU execution time $T_1$ on the same workload, strong-scaling efficiency is
+
+\[
+  E_{\mathrm{strong}}(P) = \frac{T_1}{P\,T_P}.
+\]
+
+Weak-scaling efficiency will be computed analogously for workloads that grow with $P$. Speedup of a candidate over a baseline is $T_{\mathrm{base}}/T_{\mathrm{candidate}}$, where a value greater than one indicates an improvement.
+
+GPU execution and communication are asynchronous, so timing will use device events or explicit synchronization at well-defined points. Warm-up runs will precede measurements, and repeated trials will be summarized using a stated statistic and a measure of variability. Results will be reported both for kernel execution alone and end to end, including host--device transfers, and inter-GPU communication. The hardware, software versions, and workload dimensions will be recorded for every result.
+
+\subsection{Context and Decision Overhead}
+\label{sec:context-and-decision-overhead}
+
+Topology discovery, planning, and any benchmarking used to select a strategy will be measured separately from steady-state execution. For a planning cost $C_{\mathrm{plan}}$ and per-block execution times $t_{\mathrm{base}}$ and $t_{\mathrm{candidate}}$, the number of blocks required to recover the planning cost is
+
+\[
+  N_{\mathrm{break\text{-}even}} = \frac{C_{\mathrm{plan}}}{t_{\mathrm{base}} - t_{\mathrm{candidate}}},
+\]
+
+when $t_{\mathrm{candidate}} < t_{\mathrm{base}}$. Results will report total time as a function of the number of blocks processed, showing whether a strategy is useful only for long-running workloads or also for shorter ones. Any additional memory required by a strategy will also be reported.
+
+\subsection{Interpreting Results}
+\label{sec:interpreting-results}
+
+Results will be examined alongside workload dimensions, arithmetic intensity, and interconnect characteristics. The objective is to explain why a strategy succeeds or fails, not only to report speedups. In particular, the evaluation will identify when adding GPUs or nodes improves throughput or latency, when communication overhead outweighs additional compute capacity, and which partitioning strategies are effective for which workload regimes.
+
+Where an implementation combines several changes, their effects will be separated when practical. For example, the benefit of a different partitioning strategy will be measured independently of the benefit of overlap.
+
+Project success does not require improvement for every workload. A reproducible demonstration that workload and hardware context can guide an effective execution strategy would support the core hypothesis. Evidence that a strategy provides little benefit, together with an explanation of the limiting factors, is also a useful outcome. Limitations of the evaluation, such as the use of synthetic data and the range of hardware available, will be stated alongside the results.

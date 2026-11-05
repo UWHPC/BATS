@@ -1,0 +1,35 @@
+\section{Proposed Approach}
+\label{sec:proposed-approach}
+
+The project will investigate distributed tensor-core beamforming through a sequence of baseline implementations, measurements, and targeted experiments. The initial objective is to build a correct backend and determine where its performance is limited as workloads and resources change. Specific kernel designs and distribution strategies will be chosen after profiling rather than fixed in advance.
+
+\subsection{Establishing Baselines}
+\label{sec:establishing-baselines}
+
+The first stage will establish a set of reproducible implementations against which later work is compared. A straightforward reference beamformer, computing \cref{eq:steering-weights} in double precision, will be used only to verify correctness. A library baseline using batched complex GEMM from cuBLAS~\cite{cublasDocs} will provide a single-GPU performance reference.
+
+The project will then implement a single-GPU tensor-core beamformer. This implementation will select one of the complex formulations described in \cref{sec:complex-arithmetic-on-tensor-cores} and a supported input precision, chosen according to the available hardware and the accuracy requirements established in \cref{sec:numerical-correctness}. It will be implemented in CUDA/C++, using CUTLASS~\cite{cutlass} or direct tensor-core instructions where the library interfaces do not provide sufficient control over data layout.
+
+Building on this kernel, a distributed baseline will use one simple partitioning strategy, such as partitioning by channel, with blocking communication through MPI~\cite{mpiStandard} or NCCL~\cite{ncclDocs} and no overlap. This baseline is intentionally simple: its purpose is to provide a correct point of comparison that runs across multiple GPUs and nodes.
+
+All implementations will share a documented input format and a workload generator. The generator will produce synthetic sensor data and weights, including signals from known directions whose expected beam outputs can be computed independently. A benchmark harness will record workload dimensions, hardware and software configuration, and timing results, so that measurements can be repeated.
+
+\subsection{Investigating Scaling and Communication Effects}
+\label{sec:investigating-scaling-and-communication-effects}
+
+The project will profile the baseline implementations across a range of workload dimensions and resource configurations. Sweeps will vary the number of beams, sensors, channels, and samples per block, together with the number of GPUs and nodes and the numerical precision.
+
+Both strong scaling, in which a fixed workload is spread across more GPUs, and weak scaling, in which the workload grows with the number of GPUs, will be examined. Where possible, comparisons will vary one dimension while holding the others constant, so that effects attributable to arithmetic intensity can be distinguished from those caused by data volume or communication.
+
+Nsight Systems~\cite{nsightSystems} will be used to obtain timelines showing how execution time divides between computation, memory operations, host--device transfers, inter-GPU communication, and synchronization. Nsight Compute~\cite{nsightCompute} will be used to examine individual kernels, including tensor-core utilization and achieved memory bandwidth. These measurements will be related to the arithmetic-intensity analysis of \cref{sec:workload-dimensions-and-arithmetic-intensity} and the roofline model of \cref{sec:performance-implications}.
+
+The expected outcome of this stage is an understanding of which resource limits each workload, the point at which adding GPUs or nodes stops improving performance, and how these depend on workload shape and interconnect. These findings will determine which communication-aware strategies are worth pursuing.
+
+\subsection{Developing Communication-Aware Execution}
+\label{sec:developing-communication-aware-execution}
+
+After identifying where distributed execution loses efficiency, the project will implement focused alternatives. Candidate approaches include selecting the partitioning axis according to workload dimensions and data placement, overlapping communication with computation using streams and pipelined sample blocks, and choosing how many GPUs and nodes to use when communication would otherwise dominate. These are possibilities to investigate rather than predetermined requirements.
+
+Each candidate will first be evaluated independently against the distributed baseline, and then in combination with other successful candidates. Where a strategy depends on workload or hardware context, the project will investigate how that decision should be made. A simple cost model or set of selection rules may be sufficient initially; measured autotuning may be considered if simpler approaches prove unreliable.
+
+Successful strategies will be incorporated into the backend. The backend will separate a planning step, which gathers context and selects a strategy, from an execution step, which processes sample blocks using the selected plan. This separation allows the planning cost to be measured independently and reused across many blocks, as discussed in \cref{sec:cost-of-context-aware-decisions}. The baseline strategy will remain available for comparison and for configurations the specialized strategies do not support.

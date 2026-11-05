@@ -1,7 +1,13 @@
 \documentclass[11pt,letterpaper]{article}
 
-% Page geometry and typography
+% ---------------------------------------------------------------------------
+% Page geometry
+% ---------------------------------------------------------------------------
 \usepackage[letterpaper,margin=1.25in,headheight=14pt]{geometry}
+
+% ---------------------------------------------------------------------------
+% Typography and language
+% ---------------------------------------------------------------------------
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
@@ -9,10 +15,16 @@
 \usepackage{microtype}
 \usepackage{parskip}
 
-% Mathematics, figures, tables, and code
+% ---------------------------------------------------------------------------
+% Mathematics
+% ---------------------------------------------------------------------------
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{amsthm}
+
+% ---------------------------------------------------------------------------
+% Figures and tables
+% ---------------------------------------------------------------------------
 \usepackage{graphicx}
 \usepackage{float}
 \usepackage{booktabs}
@@ -20,14 +32,32 @@
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta}
 \graphicspath{{figures/}}
+
+% ---------------------------------------------------------------------------
+% Code listings
+% ---------------------------------------------------------------------------
 \usepackage{listings}
 
-% Cross-references and hyperlinks
+% ---------------------------------------------------------------------------
+% Bibliography
+% ---------------------------------------------------------------------------
+\usepackage{csquotes}
 \usepackage{xurl}
+\usepackage[backend=biber,style=numeric,sorting=none]{biblatex}
+\setcounter{biburlnumpenalty}{100}
+\setcounter{biburlucpenalty}{100}
+\setcounter{biburllcpenalty}{100}
+\addbibresource{references.bib}
+
+% ---------------------------------------------------------------------------
+% Cross-references and hyperlinks (load late, before cleveref)
+% ---------------------------------------------------------------------------
 \usepackage[hidelinks]{hyperref}
 \usepackage{cleveref}
 
+% ---------------------------------------------------------------------------
 % Headers and footers
+% ---------------------------------------------------------------------------
 \usepackage{fancyhdr}
 \pagestyle{fancy}
 \fancyhf{}
@@ -43,31 +73,44 @@
   \renewcommand{\headrulewidth}{0pt}
 }
 
+% ---------------------------------------------------------------------------
 % Document metadata
+% ---------------------------------------------------------------------------
 \title{BATS Technical Specification}
-\author{UW High Performance Computing (UWHPC)}
+\author{TODO}
 \date{Working Draft}
+
 \hypersetup{
   pdftitle={BATS Technical Specification},
-  pdfauthor={UW High Performance Computing (UWHPC)},
-  pdfsubject={Distributed Tensor-Core Beamforming},
+  pdfauthor={TODO},
+  pdfsubject={Beamforming Across Tensor-core Systems},
 }
 
 \begin{document}
 
+% ---------------------------------------------------------------------------
+% Title page
+% ---------------------------------------------------------------------------
 \hypersetup{pageanchor=false}
 \begin{titlepage}
   \centering
   \vspace*{3cm}
+
   {\Huge\bfseries BATS Technical Specification\par}
   \vspace{1cm}
-  {\Large Distributed Tensor-Core Beamforming\par}
+  {\Large Beamforming Across Tensor-core Systems\par}
+
   \vspace{3cm}
+  {\large Project Leads: TODO\par}
+  \vspace{0.5cm}
   {\large UW High Performance Computing (UWHPC)\par}
+
   \vfill
+
   {\large\itshape Working Draft\par}
   \vspace{0.5cm}
   {\large \today\par}
+
 \end{titlepage}
 \hypersetup{pageanchor=true}
 
@@ -76,9 +119,18 @@
 \newpage
 \pagenumbering{arabic}
 
-% Approved sections
+% ---------------------------------------------------------------------------
+% Content
+% ---------------------------------------------------------------------------
 \input{sections/overview.tex}
+\input{sections/background.tex}
+\input{sections/approach.tex}
+\input{sections/evaluation.tex}
+\input{sections/milestones.tex}
 
-% Add background, approach, evaluation, milestones, and bibliography as approved.
+% ---------------------------------------------------------------------------
+% Bibliography
+% ---------------------------------------------------------------------------
+\printbibliography
 
 \end{document}
