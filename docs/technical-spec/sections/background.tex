@@ -108,7 +108,7 @@ The time-shift property of the Fourier transform states that
 
 When a channel is narrow enough that the delay $\tau$ is small relative to the inverse of the channel bandwidth, the delay can be approximated within that channel by a single phase rotation evaluated at the channel's centre frequency. This narrowband approximation turns the delay of each sensor into one complex multiplication per sample.
 
-Channelization is performed upstream of the beamformer and is outside the scope of this project (\cref{sec:scope-non-goals}). The backend will receive already-channelized complex samples, conceptually arranged as an array indexed by channel, sensor, and time. The backend will assume that samples and weights are supplied in the layout its kernels require, with each channel's matrices stored contiguously and real and imaginary parts stored separately. Preparing data in this layout is outside the scope of this project.
+Channelization is performed upstream of the beamformer and is outside the scope of this project (\cref{sec:scope-non-goals}). The backend will receive already-channelized complex samples, conceptually arranged as an array indexed by channel, sensor, and time. Its external input format will use contiguous per-channel matrices with real and imaginary parts stored separately. Preparing upstream data in this common external format is outside the scope of this project. Every strategy compared in an experiment must start from the same documented layout and ownership of samples and weights and deliver the same required output layout and ownership. Any additional packing, transposition, padding, redistribution, or copying required by a strategy is part of backend execution and must be included in its measured cost. Reusable preparation may be charged to planning, but its cost must still be reported and included in amortized comparisons.
 
 \subsubsection{Complex Steering Weights}
 \label{sec:complex-steering-weights}
@@ -302,7 +302,7 @@ The roofline model~\cite{williams2009roofline} relates attainable performance to
   \label{eq:roofline}
 \end{equation}
 
-Workloads whose intensity is below the ratio of peak arithmetic throughput to memory bandwidth are memory bound, and faster arithmetic does not help them. Workloads above this ratio are compute bound. Because tensor cores raise the peak arithmetic throughput substantially, they also raise the intensity a workload needs before it can benefit from them. Workload~A may gain little from tensor cores, while Workload~B may gain substantially.
+In the ideal roofline model, workloads whose intensity is below the ratio of peak arithmetic throughput to memory bandwidth are limited by the memory-bandwidth ceiling; workloads above this ratio are limited by the compute ceiling. These are upper bounds, rather than guarantees of achieved performance. Raising peak throughput with tensor cores raises the intensity required to become compute bound on those units, not the intensity required to obtain any speedup. A workload may be compute bound on conventional cores and memory bound on tensor cores while still benefiting substantially from tensor-core acceleration. Comparisons must therefore consider both execution paths and their respective precisions and data movement. Workload~A may gain little if both paths are already limited by memory traffic, while Workload~B may gain substantially without necessarily saturating the tensor cores.
 
 Other factors also limit performance. Small per-channel matrices may not provide enough parallel work to occupy the GPU, and launching many small kernels adds overhead. Matrix dimensions that are not multiples of the tensor-core tile sizes require padding or special handling at the boundaries, which wastes computation when $B$ or $S$ is small. If data originates in host memory, transfers over PCIe may dominate. Profiling will be required to determine which of these factors applies to each workload.
 
@@ -353,14 +353,14 @@ These strategies can also be combined, for example partitioning by channel acros
 \subsubsection{Communication--Computation Overlap}
 \label{sec:communication-computation-overlap}
 
-Communication and computation do not need to occur strictly one after the other. Using CUDA streams, a GPU can transfer one sample block while computing on another. With double buffering, two sets of buffers alternate between being filled and being processed, so that in steady state the cost of the shorter of the two operations is hidden behind the longer.
+Communication and computation do not need to occur strictly one after the other. Using CUDA streams, a GPU can transfer one sample block while computing on another. With double buffering, two sets of buffers alternate between being filled and being processed. Under ideal overlap without resource contention, the steady-state interval between completed blocks approaches the longer of the communication and computation times. This improves throughput but does not imply that an individual block's latency falls to that interval: the block must still pass through its dependent stages. Pipeline startup and drain costs must also be accounted for.
 
 Overlap is most effective when communication and computation take comparable time. If either dominates, overlap can hide at most the smaller one. Overlap also introduces contention: communication libraries may use GPU compute resources for their own kernels, and copy engines and memory bandwidth are shared. The actual benefit must therefore be measured rather than assumed.
 
 \subsubsection{Synchronization and Load Balance}
 \label{sec:synchronization-and-load-balance}
 
-Collective operations and barriers require all participating GPUs to reach the same point before any can proceed. Their cost grows with the number of participants and is higher across nodes than within a node.
+Collective operations require matching participation and ordering as specified by the communication API, but they are not generally barriers: completion on one rank does not imply that every other rank has reached or completed the operation. MPI provides explicit barrier operations, while NCCL normally enqueues communication asynchronously on a CUDA stream. The backend must establish the required buffer lifetimes, completion checks, and stream dependencies before consuming received data or reusing communication buffers. Communication cost depends on message size, participant count, topology, and the chosen algorithm; it is not necessarily monotonic in participant count.
 
 When work is divided unevenly, for example because a dimension is not divisible by $P$ or because some GPUs have slower links, faster GPUs wait for slower ones. In a pipelined system, the slowest participant determines overall throughput. Reasonable partitioning must therefore consider not only total communication volume but also how evenly work and communication are distributed.
 
