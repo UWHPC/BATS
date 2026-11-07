@@ -4,9 +4,9 @@
 \subsection{Motivation}
 \label{sec:motivation}
 
-Beamforming combines signals from an array of sensors to strengthen reception from selected directions~\cite{vanVeen1988beamforming}. A wave reaches each sensor at a slightly different time depending on its direction of arrival. Applying complex weights aligns these contributions so they add constructively for the chosen direction, while signals from other directions are attenuated. Different weight sets let the same sensor data form many beams at once, supporting applications such as radio astronomy, radar, medical ultrasound, and wireless communications.
+Beamforming combines signals from an array of sensors, using complex weights so that signals from a chosen direction add constructively while others are attenuated~\cite{vanVeen1988beamforming}. Different weight sets let the same sensor data form many beams at once, supporting applications such as radio astronomy, radar, medical ultrasound, and wireless communications.
 
-Forming many beams across frequency channels can be expressed as matrix multiplication, which GPU tensor cores accelerate~\cite{cudaProgrammingGuide}. The Tensor-Core Beamformer~\cite{oostrum2025tcbf} has shown that tensor cores make single-GPU beamforming fast and energy efficient. A single GPU, however, has limited compute throughput, memory capacity, and bandwidth. Distributing the work across GPUs and nodes adds capacity, but also adds communication and synchronization that can limit scaling.
+Forming many beams across frequency channels can be expressed as matrix multiplication, which GPU tensor cores accelerate~\cite{cudaProgrammingGuide}. The Tensor-Core Beamformer~\cite{oostrum2025tcbf} has shown that tensor cores make single-GPU beamforming fast and energy efficient. A single GPU, however, has limited compute throughput, memory capacity, and bandwidth.
 
 \subsection{Problem Statement}
 \label{sec:problem-statement}
@@ -23,18 +23,14 @@ Distributing either workload across more GPUs does not guarantee a proportional 
 \subsection{Core Hypothesis}
 \label{sec:core-hypothesis}
 
-We hypothesize that execution decisions informed by workload dimensions, data placement, and hardware connectivity can improve the throughput or scaling efficiency of distributed tensor-core beamforming relative to tuned static distribution strategies, while maintaining numerical accuracy.
+We hypothesize that no single distribution strategy is best across beamforming workloads. When each GPU starts with a subset of sensors, partitioning by sensor must sum partial outputs that grow with the number of beams, while partitioning by channel must redistribute the input instead. We expect sensor partitioning to win when there are fewer beams than sensors, and channel partitioning to win otherwise.
+
+A planner that chooses the strategy from the workload, data placement, and interconnect should then outperform the best single fixed strategy. The hypothesis is refuted if one fixed strategy performs within a preset tolerance of the best measured strategy on every tested configuration.
 
 \subsection{Project Goal}
 \label{sec:project-goal}
 
-The goal is to test this hypothesis across workloads and GPU configurations, accounting for the cost of gathering context and selecting a strategy.
-
-The project will first build a correct tensor-core beamformer that runs on a single GPU and then across multiple GPUs and nodes, with reproducible performance measurements. These baselines will be profiled across workload dimensions and GPU and node counts to identify where computation, memory access, communication, or synchronization limits performance.
-
-Based on the results of profiling, the project will develop communication-aware strategies, such as choosing how to partition the work, overlapping communication with computation, and selecting how many GPUs and nodes to use. It will integrate a selected strategy into the backend's planning step and test whether workload and hardware context can guide when it is used, with the baseline strategy handling unsupported configurations. Implementations will use CUDA/C++, with MPI~\cite{mpiStandard} or NCCL~\cite{ncclDocs} for communication.
-
-The evaluation will compare each approach with a simple distributed baseline and with tuned static strategies on numerical correctness, throughput, latency, and scaling efficiency. It will also measure the cost of gathering context and planning so any speedup can be assessed over repeated sample blocks.
+The goal is to build a distributed tensor-core beamforming backend whose planning step selects a distribution strategy from workload and hardware context, and to use it to test this hypothesis, including the cost of planning. The project will build single-GPU and distributed baselines, profile them to find what limits scaling, develop communication-aware strategies in response, and evaluate them against tuned static strategies (\cref{sec:proposed-approach,sec:evaluation}).
 
 \subsection{Scope and Non-Goals}
 \label{sec:scope-non-goals}

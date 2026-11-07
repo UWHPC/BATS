@@ -1,9 +1,7 @@
 \section{Evaluation}
 \label{sec:evaluation}
 
-Evaluation will determine whether an implementation computes the intended beams accurately and whether it improves performance. Comparisons will include all data movement each strategy requires and the cost of gathering context and selecting a strategy.
-
-Each comparison will fix a common starting layout and ownership for samples and weights, and a common required layout and ownership for outputs. Any packing, transposition, padding, copies, redistribution, or output transfers a strategy needs will be counted. Reusable preparation will be measured as planning cost and included in total-time comparisons. Host--device transfers will be included when the stated input or output boundary is in host memory; GPU-resident measurements will be labelled separately.
+Each comparison will fix a common starting layout and ownership for samples and weights, and a common required layout and ownership for outputs. Any packing, transposition, padding, copies, redistribution, or output transfers a strategy needs will be counted. Reusable preparation will be counted as planning cost (\cref{sec:context-and-decision-overhead}). Host--device transfers will be included when the stated input or output boundary is in host memory; GPU-resident measurements will be labelled separately.
 
 \subsection{Numerical Correctness}
 \label{sec:numerical-correctness}
@@ -39,7 +37,7 @@ For weak scaling, let $W$ denote the one-GPU workload and $PW$ a workload with $
   E_{\mathrm{weak}}(P) = \frac{T_1(W)}{T_P(PW)}.
 \]
 
-Ideal weak scaling keeps the execution time constant, giving an efficiency of one. The initial weak-scaling sweep will grow the channel count as $F_P = P F_1$ while holding $B$, $S$, and $T$ fixed, since adding channels does not change arithmetic intensity (\cref{eq:arithmetic-intensity}). Experiments that grow other dimensions will be reported separately, because those dimensions change arithmetic intensity and communication differently. Speedup of a candidate over a baseline is $T_{\mathrm{base}}/T_{\mathrm{candidate}}$, where a value greater than one indicates an improvement.
+Ideal weak scaling keeps the execution time constant, giving an efficiency of one. The initial weak-scaling sweep will grow the channel count as $F_P = P F_1$ while holding $B$, $S$, and $T$ fixed, since adding channels does not change arithmetic intensity (\cref{eq:arithmetic-intensity}). Speedup of a candidate over a baseline is $T_{\mathrm{base}}/T_{\mathrm{candidate}}$, where a value greater than one indicates an improvement.
 
 GPU work and communication can continue after the CPU call returns, so a CPU timer alone may stop too early. Measurements will use GPU timing events or wait for completion on all participating ranks. Timestamps from different GPUs will not be compared as though they shared a clock. Warm-up runs will precede measurements, and repeated trials will be summarized using a stated statistic and a measure of variability. Results will be reported for kernel execution alone and for the backend across the stated input and output boundaries, together with the hardware, software versions, and workload dimensions.
 
@@ -59,8 +57,6 @@ blocks, when $t_{\mathrm{candidate}} < t_{\mathrm{base}}$. The denominator is th
 \subsection{Interpreting Results}
 \label{sec:interpreting-results}
 
-Results will be examined alongside workload dimensions, arithmetic intensity, and interconnect characteristics to explain why a strategy succeeds or fails. The evaluation will identify when adding GPUs or nodes improves throughput or latency, when communication outweighs the added compute capacity, and which partitioning strategies suit which workloads.
+Results will be explained in terms of workload dimensions, arithmetic intensity, and interconnect characteristics, not only reported as speedups.
 
-Where an implementation combines several changes, their effects will be separated when practical. For example, a new partitioning strategy will be measured independently of overlap.
-
-An improvement over the simple serial baseline alone will not be taken as evidence that context-aware selection helps. That claim requires comparison with tuned static strategies that have the same optimizations available, the same local kernel and numerical formats, and the same data-placement contract. Results will also separate gains at a fixed resource count from gains due to using more or fewer GPUs or nodes, and will report resource use alongside latency and throughput. Limitations, such as the use of synthetic data and the range of hardware available, will be stated with the results.
+The core hypothesis (\cref{sec:core-hypothesis}) will be tested by comparing the planner with the best fixed strategy across the evaluation suite and with the best measured strategy for each configuration. The tolerance will be fixed before the experiments are run. These comparisons will use the same local kernel and numerical formats, so that kernel or precision changes are not attributed to strategy selection. Results will also separate gains at a fixed resource count from gains due to using more or fewer GPUs or nodes, and will report resource use alongside latency and throughput. Limitations, such as the use of synthetic data and the range of hardware available, will be stated with the results.

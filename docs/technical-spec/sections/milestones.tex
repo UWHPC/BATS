@@ -1,41 +1,31 @@
 \section{Project Milestones}
 \label{sec:project-milestones}
 
-The project will proceed through milestones with concrete outputs. Later design decisions will depend on the evidence produced by earlier stages.
+Each milestone has concrete outputs; later design decisions depend on the evidence from earlier ones.
 
 % TODO: add target dates or terms for each milestone.
 
 \subsection{Milestone 1: Single-GPU Tensor-Core Beamformer}
 \label{sec:milestone-1}
 
-Establish the input format, the synthetic workload generator, the double-precision reference, and the cuBLAS and Tensor-Core Beamformer references. Implement a single-GPU tensor-core beamformer using a chosen complex formulation and precision.
-
-This milestone is complete when the implementation passes the correctness tests in \cref{sec:numerical-correctness} within documented tolerances and its single-GPU performance has been measured against both references.
+Complete when the single-GPU beamformer, workload generator, and references from \cref{sec:establishing-baselines} exist, the beamformer passes the correctness tests in \cref{sec:numerical-correctness} within documented tolerances and its performance has been measured against the references.
 
 \subsection{Milestone 2: Reproducible Distributed Baseline}
 \label{sec:milestone-2}
 
-Extend the beamformer to multiple GPUs within a node and across nodes using one simple partitioning strategy. Verify that distributed results match single-GPU results.
-
-This milestone is complete when the distributed baseline runs on the available cluster, its results can be reproduced with the benchmark harness, and its configuration and limitations are documented.
+Complete when the simple distributed baseline runs within and across nodes on the available cluster, matches single-GPU results, its results can be reproduced with the benchmark harness, and its configuration and limitations are documented.
 
 \subsection{Milestone 3: Scaling and Communication Study}
 \label{sec:milestone-3}
 
-Profile the single-GPU and distributed baselines across workload dimensions and GPU and node counts. Determine how execution time divides between computation, memory operations, communication, and synchronization, and how this changes with workload shape and interconnect.
-
-The deliverable will be a short analysis identifying the main scaling limitations and the communication-aware strategies worth implementing. If the measurements reveal no actionable limitation, the analysis will guide a justified change in workload or target.
+The deliverable is a short analysis of the profiling in \cref{sec:investigating-scaling-and-communication-effects}, identifying the main scaling limitations and the communication-aware strategies worth implementing. If the measurements reveal no actionable limitation, the analysis will guide a justified change in workload or target.
 
 \subsection{Milestone 4: Communication-Aware Implementation}
 \label{sec:milestone-4}
 
-Implement the selected strategies, such as context-dependent partitioning, communication--computation overlap, or resource selection, together with tuned static versions of each and a mechanism for choosing between them using workload and hardware context.
-
-Demonstrate that the backend's planning step selects the specialized strategy for supported configurations and falls back to the baseline strategy for the rest. Compare each strategy with the distributed baseline, and the selector with the tuned static strategies, reporting planning overhead and resource use.
+Implement the strategies chosen in Milestone 3, their tuned static versions, and the planning step. Demonstrate that the planner selects a specialized strategy for supported configurations and falls back to the baseline for the rest, and evaluate it as described in \cref{sec:evaluation}.
 
 \subsection{Milestone 5: Final Analysis and Documentation}
 \label{sec:milestone-5}
 
-Consolidate the measurements and document the conditions under which communication-aware execution is beneficial. Report unsupported configurations and remaining limitations.
-
-The final deliverable will include reproducible evaluation instructions and a report assessing the project's core hypothesis. Conclusions will distinguish demonstrated results from proposed extensions.
+The final deliverable is a report assessing the core hypothesis, with reproducible evaluation instructions, unsupported configurations, and remaining limitations. Conclusions will distinguish demonstrated results from proposed extensions.

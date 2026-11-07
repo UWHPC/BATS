@@ -23,9 +23,9 @@ Throughout this document, the following notation is used for the dimensions of a
 \subsection{Sensor Arrays and Beamforming}
 \label{sec:sensor-arrays-and-beamforming}
 
-A sensor array is a collection of $S$ sensors placed at known positions. Depending on the application, the sensors may be radio antennas, microphones, ultrasound transducers, or hydrophones. Each sensor records a stream of samples representing the signal it receives over time. Because the sensors are at different positions, a signal arriving from a given direction reaches each of them at a slightly different time.
+A sensor array is a collection of $S$ sensors placed at known positions. Depending on the application, the sensors may be radio antennas, microphones, ultrasound transducers, or hydrophones. Each sensor records a stream of samples representing the signal it receives over time.
 
-Beamforming exploits these differences to combine the sensor signals so that the array responds strongly to a chosen direction and weakly to others~\cite{vanVeen1988beamforming}. The resulting combined signal is called a \emph{beam}. In radio astronomy, beams point the array at regions of the sky without physically moving the antennas. In radar and wireless communication, beams concentrate reception toward a target or user while suppressing interference from elsewhere.
+Beamforming combines the sensor signals so that the array responds strongly to a chosen direction and weakly to others~\cite{vanVeen1988beamforming}. The resulting combined signal is called a \emph{beam}.
 
 \subsubsection{Plane Waves and Direction of Arrival}
 \label{sec:plane-waves-and-direction-of-arrival}
@@ -79,14 +79,14 @@ The simplest beamformer compensates for the geometric delays and adds the result
 
 where $a_i$ is a real amplitude weight, for example $a_i = 1/S$. For a source in the steered direction, every shifted signal equals $s(t)$, so the contributions add coherently and the output is $s(t)$ itself. Uncorrelated noise at the sensors adds incoherently, so the signal-to-noise ratio improves by a factor of up to $S$. Signals arriving from other directions do not line up after the shift and are partially cancelled.
 
-The amplitude weights $a_i$ can be tapered across the array to trade the width of the main response for lower response in other directions. Choosing these weights is a design problem in its own right and is outside the scope of this project. The backend will accept whatever weights it is given.
+The amplitude weights $a_i$ can be tapered across the array to trade the width of the main response for lower response in other directions.
 
 \subsubsection{Multiple Simultaneous Beams}
 \label{sec:multiple-simultaneous-beams}
 
 Nothing in \cref{eq:delay-and-sum} requires the array to look in only one direction. Applying a different set of delays to the same recorded samples produces a beam pointing in a different direction. Forming $B$ beams means computing $B$ independent weighted sums over the same $S$ input signals.
 
-This property is central to the computational structure of beamforming. Every input sample contributes to every beam, so the input data is reused $B$ times. As shown in \cref{sec:workload-dimensions-and-arithmetic-intensity}, this reuse determines how much computation is performed per byte of input and therefore whether a given workload is limited by arithmetic throughput or by data movement.
+Every input sample therefore contributes to every beam and is reused $B$ times, which \cref{sec:workload-dimensions-and-arithmetic-intensity} shows is what determines arithmetic intensity.
 
 % ---------------------------------------------------------------------------
 \subsection{Frequency-Domain Beamforming}
@@ -108,7 +108,7 @@ The time-shift property of the Fourier transform states that
 
 When a channel is narrow enough that the delay $\tau$ is small relative to the inverse of the channel bandwidth, the delay can be approximated within that channel by a single phase rotation evaluated at the channel's centre frequency. This narrowband approximation turns the delay of each sensor into one complex multiplication per sample.
 
-Channelization is performed upstream of the beamformer and is outside the scope of this project (\cref{sec:scope-non-goals}). The backend will receive already-channelized complex samples, conceptually arranged as an array indexed by channel, sensor, and time. Its external input format will use contiguous per-channel matrices with real and imaginary parts stored separately. Preparing upstream data in this common external format is outside the scope of this project. Every strategy compared in an experiment must start from the same documented layout and ownership of samples and weights and deliver the same required output layout and ownership. Any additional packing, transposition, padding, redistribution, or copying required by a strategy is part of backend execution and must be included in its measured cost. Reusable preparation may be charged to planning, but its cost must still be reported and included in amortized comparisons.
+The backend will receive already-channelized complex samples (\cref{sec:scope-non-goals}), indexed by channel, sensor, and time, stored as contiguous per-channel matrices with real and imaginary parts kept separately. How data-layout costs are counted in comparisons is defined in \cref{sec:evaluation}.
 
 \subsubsection{Complex Steering Weights}
 \label{sec:complex-steering-weights}
@@ -124,7 +124,7 @@ Combining \cref{eq:geometric-delay,eq:delay-and-sum,eq:time-shift}, the beam $b$
 
 where $\tau_{b,i}$ is the geometric delay of sensor $i$ for the direction of beam $b$, and $x_{f,i}[t]$ is the $t$-th sample of sensor $i$ in channel $f$. The weights depend on frequency, so every channel has its own set of $B \times S$ weights.
 
-In practice, weights may also include calibration corrections for each sensor's gain and phase. Computing such weights is outside the scope of this project. The backend will treat the weights as an input supplied alongside the samples. Weights generally change much more slowly than the sample data, so a single set of weights can be reused across many sample blocks.
+In practice, weights may also include calibration corrections for each sensor's gain and phase. Weights generally change much more slowly than the sample data, so a single set of weights can be reused across many sample blocks.
 
 \subsubsection{Example on a Small Array}
 \label{sec:example-on-a-small-array}
@@ -149,13 +149,13 @@ recovering the full signal. Beam 0 computes
   y_0 = \tfrac14 \sum_{i=0}^{3} e^{\,j i \phi_1},
 \]
 
-which has magnitude less than one unless $\phi_1$ is a multiple of $2\pi$. The same four input values thus produce a strong response in the beam steered toward the source and a weaker response in the other beam. Each of the two outputs required four complex multiply-accumulate operations over the same inputs, which is the structure exploited in the next subsection.
+which has magnitude less than one unless $\phi_1$ is a multiple of $2\pi$. The same four input values thus produce a strong response in the beam steered toward the source and a weaker response in the other beam.
 
 % ---------------------------------------------------------------------------
 \subsection{Beamforming as Matrix Multiplication}
 \label{sec:beamforming-as-matrix-multiplication}
 
-\Cref{eq:steering-weights} computes, for every beam and every time sample, a weighted sum over sensors. Collected over all beams and samples, these sums form a matrix product. This observation allows beamforming to be implemented with highly optimized matrix-multiplication routines and hardware.
+\Cref{eq:steering-weights} computes, for every beam and every time sample, a weighted sum over sensors. Collected over all beams and samples, these sums form a matrix product.
 
 \subsubsection{Per-Channel Formulation}
 \label{sec:per-channel-formulation}
@@ -196,7 +196,7 @@ Row $b$ of $W_f$ holds the weights of beam $b$, column $t$ of $X_f$ holds the sa
     \node[dim,above] at (X.north) {$T$ samples};
     \node[dim,right] at (X.east) {$S$};
   \end{tikzpicture}
-  \caption{Beamforming for one channel as a matrix product. Each row of $W_f$ holds one beam's weights, each column of $X_f$ holds all sensor values at one time sample, and each entry of $Y_f$ is one beam's output at one time sample. All $F$ channels together form a batch of such products.}
+  \caption{Beamforming for one channel as a matrix product (\cref{eq:per-channel-gemm}). All $F$ channels together form a batch of such products.}
   \label{fig:per-channel-gemm}
 \end{figure}
 
@@ -209,7 +209,7 @@ Some applications do not need the complex beam samples themselves and instead ac
 
 The channels are independent: each has its own weight matrix and its own input, and no channel's output depends on another's. Beamforming over all $F$ channels is therefore a \emph{batched} complex general matrix multiplication (GEMM), consisting of $F$ independent products of the form in \cref{eq:per-channel-gemm}.
 
-Batched GEMM is a standard operation supported by vendor libraries such as cuBLAS~\cite{cublasDocs} and template libraries such as CUTLASS~\cite{cutlass}. These provide a natural correctness reference and performance baseline for the project. The Tensor-Core Beamformer~\cite{oostrum2025tcbf} applies this formulation specifically to beamforming on a single GPU, supporting 16-bit and 1-bit precision on NVIDIA and AMD GPUs. However, generic library routines do not account for the reduced-precision formats common in sensor data, and none of these libraries distribute the computation across multiple GPUs and nodes, which is the focus of this project.
+Batched GEMM is supported by libraries such as cuBLAS~\cite{cublasDocs} and CUTLASS~\cite{cutlass}, and the Tensor-Core Beamformer~\cite{oostrum2025tcbf} applies it specifically to beamforming on a single GPU, supporting 16-bit and 1-bit precision on NVIDIA and AMD GPUs. None of these distribute the computation across multiple GPUs and nodes, which is the focus of this project.
 
 \subsubsection{Workload Dimensions and Arithmetic Intensity}
 \label{sec:workload-dimensions-and-arithmetic-intensity}
@@ -237,22 +237,9 @@ The \emph{arithmetic intensity} is the ratio of work to data movement,
 
 The channel count $F$ cancels: adding channels adds work and data in equal proportion. The remaining dimensions do not. When the number of beams is small compared with $S$ and $T$, the intensity is approximately $8B/e$ and grows linearly with $B$. For long sample blocks ($T$ large), the intensity approaches $8BS/\big(e(B+S)\big)$, which is limited by the smaller of $B$ and $S$.
 
-This makes the two workloads introduced in \cref{sec:problem-statement} precise. Workload~A, with few beams, has low arithmetic intensity: each input sample is read once and used in only a few operations, so performance is bounded by memory and transfer bandwidth. Workload~B, with many beams, reuses each sample many times, raising its intensity to the point where arithmetic throughput becomes the limit and tensor cores can be used effectively.
+This makes the two workloads in \cref{sec:problem-statement} precise: Workload~A, with small $B$, has intensity near $8B/e$ and is bound by memory bandwidth, while Workload~B, with large $B$, has much higher intensity and can become compute bound.
 
-The dimensions also affect communication when the workload is distributed, as summarized below and discussed further in \cref{sec:partitioning-strategies}.
-
-\begin{center}
-\begin{tabular}{@{}lll@{}}
-  \toprule
-  Dimension & Effect on computation & Effect on data volume \\
-  \midrule
-  $B$ (beams)    & linear increase & increases weights and output \\
-  $S$ (sensors)  & linear increase & increases input and weights \\
-  $F$ (channels) & linear increase & increases all data equally \\
-  $T$ (samples)  & linear increase & increases input and output \\
-  \bottomrule
-\end{tabular}
-\end{center}
+The same dimensions determine how much data a distributed run must communicate, as discussed in \cref{sec:partitioning-strategies}.
 
 % ---------------------------------------------------------------------------
 \subsection{Beamforming on GPUs and Tensor Cores}
@@ -306,7 +293,7 @@ A third option, the \emph{3M} or Gauss method, uses three real products instead 
 
 This reduces multiplication work by a quarter at the cost of additional matrix additions and somewhat weaker numerical error bounds~\cite{higham1992complex}. Whether the saving is worthwhile depends on precision and on whether the workload is compute bound.
 
-These formulations also interact with storage layout. Complex values may be stored \emph{interleaved}, with real and imaginary parts adjacent in memory, or \emph{planar}, with separate real and imaginary arrays. Tensor-core kernels generally prefer planar data, and the backend will assume its inputs are supplied in planar form.
+These formulations also interact with storage layout. Complex values may be stored \emph{interleaved}, with real and imaginary parts adjacent in memory, or \emph{planar}, with separate real and imaginary arrays. Tensor-core kernels generally prefer planar data, which is the input format assumed in \cref{sec:channelized-input}.
 
 \subsubsection{Reduced Precision}
 \label{sec:reduced-precision}
@@ -329,7 +316,7 @@ The roofline model~\cite{williams2009roofline} relates attainable performance to
 
 In the ideal roofline model, workloads whose intensity is below the ratio of peak arithmetic throughput to memory bandwidth are limited by the memory-bandwidth ceiling; workloads above this ratio are limited by the compute ceiling. These are upper bounds, rather than guarantees of achieved performance. Raising peak throughput with tensor cores raises the intensity required to become compute bound on those units, not the intensity required to obtain any speedup. A workload may be compute bound on conventional cores and memory bound on tensor cores while still benefiting substantially from tensor-core acceleration. Comparisons must therefore consider both execution paths and their respective precisions and data movement. Workload~A may gain little if both paths are already limited by memory traffic, while Workload~B may gain substantially without necessarily saturating the tensor cores.
 
-Other factors also limit performance. Small per-channel matrices may not provide enough parallel work to occupy the GPU, and launching many small kernels adds overhead. Matrix dimensions that are not multiples of the tensor-core tile sizes require padding or special handling at the boundaries, which wastes computation when $B$ or $S$ is small. If data originates in host memory, transfers over PCIe may dominate. Profiling will be required to determine which of these factors applies to each workload.
+Other factors also limit performance. Small per-channel matrices may not provide enough parallel work to occupy the GPU, and launching many small kernels adds overhead. Matrix dimensions that are not multiples of the tensor-core tile sizes require padding or special handling at the boundaries, which wastes computation when $B$ or $S$ is small. If data originates in host memory, transfers over PCIe may dominate.
 
 % TODO: add a roofline figure for the target GPU with Workloads A and B marked.
 
@@ -337,7 +324,7 @@ Other factors also limit performance. Small per-channel matrices may not provide
 \subsection{Multi-GPU and Multi-Node Execution}
 \label{sec:multi-gpu-and-multi-node-execution}
 
-Distributing beamforming across GPUs provides more arithmetic throughput, memory capacity, and aggregate memory bandwidth. In large instruments, the data may also already be spread across many nodes as it arrives. Distribution introduces a new cost: data must be moved between devices, and devices must coordinate. Understanding and reducing this cost is the central concern of this project.
+Distribution requires moving data between devices and coordinating them. This subsection describes the hardware, communication operations, and partitioning choices that determine that cost.
 
 \subsubsection{Interconnects}
 \label{sec:interconnects}
@@ -356,7 +343,7 @@ This hierarchy means that the same partitioning strategy can perform very differ
 
 Distributed GPU programs exchange data using point-to-point operations, in which one process sends data to another, and collective operations, in which a group of processes participates together. Collectives relevant to beamforming include \emph{broadcast} and \emph{all-gather}, which replicate data; \emph{all-to-all}, which redistributes data so that each process receives a different piece from every other; and \emph{reduce} and \emph{reduce-scatter}, which sum contributions from all processes.
 
-These operations are provided by MPI~\cite{mpiStandard}, which in CUDA-aware implementations can operate directly on GPU memory, and by NCCL~\cite{ncclDocs}, which implements collectives optimized for NVIDIA GPU interconnects. Which primitives a distributed beamformer needs depends on how the work is partitioned.
+These operations are provided by MPI~\cite{mpiStandard}, which in CUDA-aware implementations can operate directly on GPU memory, and by NCCL~\cite{ncclDocs}, which implements collectives optimized for NVIDIA GPU interconnects.
 
 \subsubsection{Partitioning Strategies}
 \label{sec:partitioning-strategies}
@@ -364,13 +351,13 @@ These operations are provided by MPI~\cite{mpiStandard}, which in CUDA-aware imp
 The batched GEMM can be divided among $P$ GPUs along any of its four dimensions. Each choice determines what data each GPU must hold and what must be communicated.
 
 \begin{itemize}
-  \item \textbf{By channel.} Each GPU processes $F/P$ channels for all sensors, beams, and samples. The channels are independent, so no communication is needed during computation. However, each GPU needs every sensor's data for its channels. If data arrives grouped by sensor, as is common when each node receives a subset of the array, an all-to-all exchange of the input is required first.
+  \item \textbf{By channel.} Each GPU processes $F/P$ channels for all sensors, beams, and samples. The channels are independent, so no communication is needed during computation. However, each GPU needs every sensor's data for its channels. If each GPU starts with a subset of sensors, an all-to-all exchange of the input is required first.
   \item \textbf{By beam.} Each GPU forms $B/P$ beams for all channels. The weights are divided, but every GPU needs the complete input, so the input must be broadcast or all-gathered. This multiplies input traffic by up to $P$.
   \item \textbf{By sensor.} Each GPU holds $S/P$ sensors and computes a partial sum of every beam over its sensors. The partial outputs must then be summed across GPUs using a reduction. The communicated volume is proportional to the output size, $BTF$, which is large when many beams are formed.
   \item \textbf{By time.} Each GPU processes a contiguous range of samples. Weights must be replicated, and, like channel partitioning, each GPU needs all sensors for its time range.
 \end{itemize}
 
-These strategies can also be combined, for example partitioning by channel across nodes and by beam within a node. The best choice depends on the workload dimensions, on where data initially resides, and on where outputs are needed. For a workload with few beams, a sensor-based partition with a small reduction may be cheaper than redistributing the input. For a workload with many beams, the same reduction may be too expensive.
+These strategies can also be combined, for example partitioning by channel across nodes and by beam within a node. Which choice is cheapest depends on the workload dimensions and data placement, as stated in the core hypothesis (\cref{sec:core-hypothesis}).
 
 % TODO: add a table giving communication volume per strategy as a function of
 % B, S, T, F, and P, under a stated assumption about initial data placement.
@@ -378,9 +365,9 @@ These strategies can also be combined, for example partitioning by channel acros
 \subsubsection{Communication--Computation Overlap}
 \label{sec:communication-computation-overlap}
 
-Communication and computation do not need to occur strictly one after the other. Using CUDA streams, a GPU can transfer one sample block while computing on another. With double buffering, two sets of buffers alternate between being filled and being processed. Under ideal overlap without resource contention, the steady-state interval between completed blocks approaches the longer of the communication and computation times. This improves throughput but does not imply that an individual block's latency falls to that interval: the block must still pass through its dependent stages. Pipeline startup and drain costs must also be accounted for.
+Communication and computation do not need to occur strictly one after the other. Using CUDA streams, a GPU can transfer one sample block while computing on another. With double buffering, two sets of buffers alternate between being filled and being processed. Under ideal overlap without resource contention, the steady-state interval between completed blocks approaches the longer of the communication and computation times. This improves throughput but not the latency of an individual block, which must still pass through each dependent stage.
 
-Overlap is most effective when communication and computation take comparable time. If either dominates, overlap can hide at most the smaller one. Overlap also introduces contention: communication libraries may use GPU compute resources for their own kernels, and copy engines and memory bandwidth are shared. The actual benefit must therefore be measured rather than assumed.
+Overlap is most effective when communication and computation take comparable time. If either dominates, overlap can hide at most the smaller one. Overlap also introduces contention: communication libraries may use GPU compute resources for their own kernels, and copy engines and memory bandwidth are shared.
 
 \subsubsection{Synchronization and Load Balance}
 \label{sec:synchronization-and-load-balance}
@@ -393,14 +380,12 @@ When work is divided unevenly, for example because a dimension is not divisible 
 \subsection{Data Placement and Context}
 \label{sec:data-placement-and-context}
 
-\Cref{sec:partitioning-strategies} showed that the best distribution strategy depends on information beyond the matrix dimensions. This subsection describes the context that may be available before execution, and the cost of using it.
+This subsection describes the context available before execution and the cost of using it.
 
 \subsubsection{Input and Output Placement}
 \label{sec:input-and-output-placement}
 
-In a deployed system, data does not start in one place. A node may receive samples from a subset of sensors, or a subset of channels, directly from the network. Beam outputs may be needed on a single node for further processing, distributed across nodes, or written to storage. A partitioning strategy that matches the existing data placement may avoid a redistribution step entirely, while one that does not may spend more time moving data than it saves in computation.
-
-The backend will therefore treat the initial location of inputs and the required location of outputs as part of the problem description, rather than assuming data starts on a single GPU.
+In a deployed system, data does not start in one place. A node may receive samples from a subset of sensors, or a subset of channels, directly from the network. Beam outputs may be needed on a single node for further processing, distributed across nodes, or written to storage. The backend will therefore treat the initial location of inputs and the required location of outputs as part of the problem description, rather than assuming data starts on a single GPU.
 
 \subsubsection{Hardware Topology Discovery}
 \label{sec:hardware-topology-discovery}
@@ -410,6 +395,4 @@ Information about the hardware can be obtained at runtime. This includes the GPU
 \subsubsection{Cost of Context-Aware Decisions}
 \label{sec:cost-of-context-aware-decisions}
 
-Gathering context and selecting a strategy is not free. Topology queries are inexpensive, but choosing a strategy may involve evaluating a cost model or running short benchmarks of candidate configurations. Such costs must be recovered through faster execution.
-
-A single run often processes many sample blocks with the same configuration. A decision made once can then be reused for every block, and even a relatively expensive selection step may be worthwhile. For short runs, the same overhead may outweigh the benefit. This trade-off is evaluated in \cref{sec:context-and-decision-overhead}.
+Topology queries are inexpensive, but choosing a strategy may involve evaluating a cost model or running short benchmarks of candidate configurations. Because a run typically processes many sample blocks with the same configuration, this one-time cost can be amortized; \cref{sec:context-and-decision-overhead} defines when it pays off.
