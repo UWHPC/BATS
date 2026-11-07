@@ -175,6 +175,31 @@ For a fixed channel $f$, arrange the weights, inputs, and outputs as matrices:
 
 Row $b$ of $W_f$ holds the weights of beam $b$, column $t$ of $X_f$ holds the samples of all sensors at time $t$, and entry $(b,t)$ of $Y_f$ is the output of beam $b$ at time $t$. In the example of \cref{sec:example-on-a-small-array}, $W_f$ is a $2 \times 4$ matrix, and each column of $X_f$ is the four-element vector of sensor values at one instant.
 
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}[
+    mat/.style={draw,thick,fill=gray!10,align=center},
+    dim/.style={font=\small}
+  ]
+    % Y_f: B x T
+    \node[mat,minimum width=3.6cm,minimum height=1.4cm] (Y) at (0,0) {$Y_f$};
+    \node[dim,above] at (Y.north) {$T$ samples};
+    \node[dim,left] at (Y.west) {$B$};
+    \node at (2.45,0) {$=$};
+    % W_f: B x S
+    \node[mat,minimum width=2.2cm,minimum height=1.4cm] (W) at (4.4,0) {$W_f$};
+    \node[dim,above] at (W.north) {$S$ sensors};
+    \node[dim,left] at (W.west) {$B$};
+    \node at (5.95,0) {$\times$};
+    % X_f: S x T
+    \node[mat,minimum width=3.6cm,minimum height=2.2cm] (X) at (8.2,0) {$X_f$};
+    \node[dim,above] at (X.north) {$T$ samples};
+    \node[dim,right] at (X.east) {$S$};
+  \end{tikzpicture}
+  \caption{Beamforming for one channel as a matrix product. Each row of $W_f$ holds one beam's weights, each column of $X_f$ holds all sensor values at one time sample, and each entry of $Y_f$ is one beam's output at one time sample. All $F$ channels together form a batch of such products.}
+  \label{fig:per-channel-gemm}
+\end{figure}
+
 Some applications do not need the complex beam samples themselves and instead accumulate beam power, $\sum_t |y_{f,b}[t]|^2$, over an integration period. Such post-processing reduces the output volume significantly. The initial backend will produce complex beam samples; support for power integration may be considered later.
 
 % TODO: decide whether power integration is in scope for the first version.
@@ -184,7 +209,7 @@ Some applications do not need the complex beam samples themselves and instead ac
 
 The channels are independent: each has its own weight matrix and its own input, and no channel's output depends on another's. Beamforming over all $F$ channels is therefore a \emph{batched} complex general matrix multiplication (GEMM), consisting of $F$ independent products of the form in \cref{eq:per-channel-gemm}.
 
-Batched GEMM is a standard operation supported by vendor libraries such as cuBLAS~\cite{cublasDocs} and template libraries such as CUTLASS~\cite{cutlass}. These provide a natural correctness reference and performance baseline for the project. However, generic library routines do not account for the reduced-precision formats common in sensor data, or the distribution of data across GPUs. These are the areas where a specialized backend may provide benefit.
+Batched GEMM is a standard operation supported by vendor libraries such as cuBLAS~\cite{cublasDocs} and template libraries such as CUTLASS~\cite{cutlass}. These provide a natural correctness reference and performance baseline for the project. The Tensor-Core Beamformer~\cite{oostrum2025tcbf} applies this formulation specifically to beamforming on a single GPU, supporting 16-bit and 1-bit precision on NVIDIA and AMD GPUs. However, generic library routines do not account for the reduced-precision formats common in sensor data, and none of these libraries distribute the computation across multiple GPUs and nodes, which is the focus of this project.
 
 \subsubsection{Workload Dimensions and Arithmetic Intensity}
 \label{sec:workload-dimensions-and-arithmetic-intensity}
@@ -238,7 +263,7 @@ GPUs are well suited to beamforming. The batched GEMM exposes parallelism across
 \subsubsection{Tensor Core Fundamentals}
 \label{sec:tensor-core-fundamentals}
 
-A tensor core performs a small matrix multiply-accumulate (MMA) operation, $D = AB + C$, on fixed-size tiles. The operation is issued cooperatively by the threads of a warp. For example, one supported shape multiplies a $16 \times 16$ tile by a $16 \times 8$ tile with half-precision inputs~\cite{ptxISA}. The supported tile shapes and input types depend on the GPU architecture.
+A tensor core performs a small matrix multiply-accumulate (MMA) operation, $D = AB + C$, on small fixed-size blocks of a matrix, called \emph{tiles}. The operation is issued cooperatively by the threads of a warp. For example, one supported shape multiplies a $16 \times 16$ tile by a $16 \times 8$ tile with half-precision inputs~\cite{ptxISA}. The supported tile shapes and input types depend on the GPU architecture.
 
 Tensor cores can be used through several interfaces. cuBLAS and cuBLASLt select tensor-core kernels automatically when data types and dimensions permit. CUTLASS provides composable templates for building custom tensor-core kernels. The CUDA WMMA API and inline PTX \texttt{mma} instructions give direct control at the warp level. The choice of interface trades development effort against control over data layout and fusion with surrounding operations.
 
@@ -387,9 +412,4 @@ Information about the hardware can be obtained at runtime. This includes the GPU
 
 Gathering context and selecting a strategy is not free. Topology queries are inexpensive, but choosing a strategy may involve evaluating a cost model or running short benchmarks of candidate configurations. Such costs must be recovered through faster execution.
 
-Beamforming systems often process a continuous stream of sample blocks with the same configuration for long periods. In that setting, a decision made once can be reused for many blocks, and even a relatively expensive selection step may be worthwhile. For short or frequently changing workloads, the same overhead may outweigh the benefit. This trade-off is evaluated in \cref{sec:context-and-decision-overhead}.
-
-\subsubsection{Initial Project Scope}
-\label{sec:initial-project-scope}
-
-The first version of the backend will assume NVIDIA GPUs, homogeneous nodes, supplied weights, and a workload configuration that is fixed for the duration of a run. Within these assumptions, it will investigate how workload dimensions, data placement, and hardware connectivity can inform partitioning, overlap, and resource selection. Heterogeneous clusters, other accelerator vendors, and workloads whose configuration changes during execution may be considered as later extensions.
+A single run often processes many sample blocks with the same configuration. A decision made once can then be reused for every block, and even a relatively expensive selection step may be worthwhile. For short runs, the same overhead may outweigh the benefit. This trade-off is evaluated in \cref{sec:context-and-decision-overhead}.

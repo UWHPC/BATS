@@ -8,30 +8,30 @@ The project will proceed through milestones with concrete outputs. Later design 
 \subsection{Milestone 1: Single-GPU Tensor-Core Beamformer}
 \label{sec:milestone-1}
 
-Establish the input format, the synthetic workload generator, the double-precision reference, and the cuBLAS baseline. Implement a single-GPU tensor-core beamformer using a chosen complex formulation and precision.
+Establish the input format, the synthetic workload generator, the double-precision reference, and the cuBLAS and Tensor-Core Beamformer references. Implement a single-GPU tensor-core beamformer using a chosen complex formulation and precision.
 
-This milestone is complete when the tensor-core implementation passes the correctness tests of \cref{sec:numerical-correctness} within documented tolerances and initial single-GPU performance has been measured against the cuBLAS baseline.
+This milestone is complete when the implementation passes the correctness tests in \cref{sec:numerical-correctness} within documented tolerances and its single-GPU performance has been measured against both references.
 
 \subsection{Milestone 2: Reproducible Distributed Baseline}
 \label{sec:milestone-2}
 
 Extend the beamformer to multiple GPUs within a node and across nodes using one simple partitioning strategy. Verify that distributed results match single-GPU results.
 
-This milestone is complete when the distributed baseline runs on the available cluster, its results can be reproduced using the benchmark harness, and its configuration and limitations are documented.
+This milestone is complete when the distributed baseline runs on the available cluster, its results can be reproduced with the benchmark harness, and its configuration and limitations are documented.
 
 \subsection{Milestone 3: Scaling and Communication Study}
 \label{sec:milestone-3}
 
 Profile the single-GPU and distributed baselines across workload dimensions and GPU and node counts. Determine how execution time divides between computation, memory operations, communication, and synchronization, and how this changes with workload shape and interconnect.
 
-The deliverable will be a concise analysis identifying the main scaling limitations and a short list of communication-aware strategies worth implementing. If the measurements reveal no actionable limitation, the analysis will guide a justified change in workload or target.
+The deliverable will be a short analysis identifying the main scaling limitations and the communication-aware strategies worth implementing. If the measurements reveal no actionable limitation, the analysis will guide a justified change in workload or target.
 
 \subsection{Milestone 4: Communication-Aware Implementation}
 \label{sec:milestone-4}
 
-Implement the selected strategies, such as context-dependent partitioning, communication--computation overlap, or resource selection, together with a mechanism for choosing between them using workload and hardware context.
+Implement the selected strategies, such as context-dependent partitioning, communication--computation overlap, or resource selection, together with tuned static versions of each and a mechanism for choosing between them using workload and hardware context.
 
-The deliverable will include the implementation, its supported configurations, and an evaluation of each strategy against the distributed baseline, including planning overhead.
+Demonstrate that the backend's planning step selects the specialized strategy for supported configurations and falls back to the baseline strategy for the rest. Compare each strategy with the distributed baseline, and the selector with the tuned static strategies, reporting planning overhead and resource use.
 
 \subsection{Milestone 5: Final Analysis and Documentation}
 \label{sec:milestone-5}

@@ -1,58 +1,44 @@
-\section{Overview}
-\label{sec:overview}
+\section{Project Overview}
+\label{sec:project-overview}
 
 \subsection{Motivation}
 \label{sec:motivation}
 
-Beamforming combines signals from an array of sensors to strengthen reception from selected directions. A wave reaches each sensor at a slightly different time depending on its direction of arrival. Applying delays or complex weights aligns these contributions so they add constructively for the desired direction, while signals from other directions are generally attenuated. Different weight sets allow the same sensor data to produce multiple simultaneous beams, supporting applications such as radio astronomy, radar, and wireless communications.
+Beamforming combines signals from an array of sensors to strengthen reception from selected directions~\cite{vanVeen1988beamforming}. A wave reaches each sensor at a slightly different time depending on its direction of arrival. Applying complex weights aligns these contributions so they add constructively for the chosen direction, while signals from other directions are attenuated. Different weight sets let the same sensor data form many beams at once, supporting applications such as radio astronomy, radar, medical ultrasound, and wireless communications.
 
-Forming many beams across frequency channels exposes substantial parallelism and can be expressed as matrix multiplication, making GPUs and their tensor cores well suited to the computation. A single GPU has limited compute throughput, memory capacity, and data bandwidth. Distributing the workload across GPUs and nodes provides additional capacity, but introduces communication and synchronization overhead that can limit scaling.
-
-This project will first establish a correct, efficient beamforming backend that scales across multiple GPUs and nodes. We will then explore a communication-aware backend, focusing on data partitioning, communication--computation overlap, and efficient resource use.
+Forming many beams across frequency channels can be expressed as matrix multiplication, which GPU tensor cores accelerate~\cite{cudaProgrammingGuide}. The Tensor-Core Beamformer~\cite{oostrum2025tcbf} has shown that tensor cores make single-GPU beamforming fast and energy efficient. A single GPU, however, has limited compute throughput, memory capacity, and bandwidth. Distributing the work across GPUs and nodes adds capacity, but also adds communication and synchronization that can limit scaling.
 
 \subsection{Problem Statement}
 \label{sec:problem-statement}
 
-The computational cost of beamforming depends on the number of sensors, beams, frequency channels, and samples processed at once. These dimensions affect both the amount of computation and the volume of data that must be stored and transferred. As a result, the same beamforming algorithm can have different performance characteristics across workloads, even when running on the same hardware.
-
-For example, consider two workloads using the same sensor array and signal bandwidth:
+The cost of beamforming depends on the number of sensors, beams, frequency channels, and samples processed at once. These dimensions set both the amount of computation and the volume of data that must be stored and moved. Consider two workloads using the same sensor array:
 
 \begin{itemize}
-  \item \textbf{Workload A} forms a small number of beams. There is relatively little computation per input sample, so memory access and data transfers may dominate execution.
-  \item \textbf{Workload B} forms many beams from the same input signals. Reusing those signals across more beams increases the computation performed per sample and may make better use of tensor cores.
+  \item \textbf{Workload A} forms a small number of beams. There is little computation per input sample, so memory access and data transfers may dominate execution.
+  \item \textbf{Workload B} forms many beams from the same input signals. Reusing each sample across more beams increases the computation per sample and makes better use of tensor cores.
 \end{itemize}
 
-Distributing either workload across additional GPUs does not guarantee a proportional improvement. Each GPU receives a smaller portion of the computation, but processing may also require input redistribution, synchronization, and output transfers. When execution crosses node boundaries, the network introduces additional constraints. The resulting performance depends on how the workload is partitioned, where its data initially resides, and where the outputs are needed.
-
-The initial engineering problem is therefore to build a correct beamforming backend that uses tensor cores and supports execution across multiple GPUs and nodes, while accounting for the data movement required by its distribution strategy. Its evaluation must establish when adding resources improves throughput or latency and when communication overhead outweighs the benefit of additional compute capacity.
-
-This working baseline will support subsequent investigation of a communication-aware backend. Workload dimensions and data placement may inform better partitioning and execution decisions, including opportunities to overlap communication with computation. Which strategies provide useful improvements will be determined through profiling and controlled comparisons.
+Distributing either workload across more GPUs does not guarantee a proportional improvement. Each GPU does less computation, but inputs may need to be redistributed and outputs collected, and crossing node boundaries adds network costs. Performance depends on how the work is partitioned, where the data starts, and where the outputs are needed.
 
 \subsection{Core Hypothesis}
 \label{sec:core-hypothesis}
 
-We hypothesize that the performance of distributed tensor-core beamforming can be improved by making execution decisions that account for workload dimensions, data placement, and the communication capabilities of the available hardware. Different workloads may benefit from different partitioning strategies and GPU counts, meaning a single distribution strategy may not be efficient across all configurations.
-
-Once a correct distributed baseline is established, we will investigate whether communication-aware partitioning and communication--computation overlap can improve throughput, latency, or scaling efficiency relative to that baseline while maintaining numerical accuracy. The objective is to determine when these strategies provide a measurable benefit and which workload and hardware characteristics explain that benefit.
+We hypothesize that execution decisions informed by workload dimensions, data placement, and hardware connectivity can improve the throughput or scaling efficiency of distributed tensor-core beamforming relative to tuned static distribution strategies, while maintaining numerical accuracy.
 
 \subsection{Project Goal}
 \label{sec:project-goal}
 
-The goal of this project is to develop and evaluate a context- and communication-aware backend for beamforming on GPU tensor cores across multiple nodes. The backend will use information about workload dimensions, data placement, GPU capabilities, and network connectivity to guide how data and computation are distributed across the cluster.
+The goal is to test this hypothesis across workloads and GPU configurations, accounting for the cost of gathering context and selecting a strategy.
 
-The project will first establish a correct distributed implementation with reproducible performance measurements. This baseline will support profiling across different workloads and GPU configurations to identify where computation, memory access, communication, or synchronization limits performance.
+The project will first build a correct tensor-core beamformer that runs on a single GPU and then across multiple GPUs and nodes, with reproducible performance measurements. These baselines will be profiled across workload dimensions and GPU and node counts to identify where computation, memory access, communication, or synchronization limits performance.
 
-Using these findings, we will investigate strategies such as workload partitioning, communication--computation overlap, and resource selection. Successful strategies will be incorporated into the backend and evaluated against the baseline, accounting for any overhead introduced by gathering context and making execution decisions.
+Based on the results of profiling, the project will develop communication-aware strategies, such as choosing how to partition the work, overlapping communication with computation, and selecting how many GPUs and nodes to use. It will integrate a selected strategy into the backend's planning step and test whether workload and hardware context can guide when it is used, with the baseline strategy handling unsupported configurations. Implementations will use CUDA/C++, with MPI~\cite{mpiStandard} or NCCL~\cite{ncclDocs} for communication.
 
-The objective is to determine whether, when, and why context-aware execution improves throughput, latency, and resource efficiency while maintaining numerical accuracy.
+The evaluation will compare each approach with a simple distributed baseline and with tuned static strategies on numerical correctness, throughput, latency, and scaling efficiency. It will also measure the cost of gathering context and planning so any speedup can be assessed over repeated sample blocks.
 
 \subsection{Scope and Non-Goals}
 \label{sec:scope-non-goals}
 
-The initial scope focuses on frequency-domain beamforming using complex steering weights, accelerated through tensor cores on NVIDIA GPUs and distributed across multiple GPUs and nodes. Evaluation will use controlled workloads with varying sensor counts, beam counts, frequency channels, and sample-block sizes to examine numerical accuracy and performance.
+The initial scope is frequency-domain beamforming with complex steering weights on NVIDIA GPUs, distributed across multiple GPUs and nodes. The backend will operate on supplied channelized samples and weights. Acquisition hardware, channelization, calibration, weight generation, and complete telescope or radar pipelines are outside the scope, as are other accelerator vendors and heterogeneous clusters.
 
-The project will investigate how workload characteristics, data placement, and hardware connectivity can inform partitioning, communication--computation overlap, and resource selection. Comparisons will include computation and the data movement required by each strategy, alongside the overhead of gathering context and making execution decisions.
-
-The initial implementation will operate on supplied sensor samples and beamforming weights. Developing acquisition hardware, channelization, calibration, beamforming weight-generation algorithms, or a complete telescope or radar processing pipeline is outside this scope. Support for other accelerator vendors and heterogeneous clusters may be considered later.
-
-The project does not aim to achieve linear scaling or outperform the baseline for every workload. Identifying when communication-aware execution helps, when it adds unnecessary overhead, and what limits further scaling are all useful outcomes.
+Linear scaling, or outperforming the baseline on every workload, is not required. Cases where communication-aware execution adds overhead or does not help will show when it is useful and what limits further scaling.
