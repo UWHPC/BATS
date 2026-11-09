@@ -68,7 +68,7 @@ The goal is to build a distributed tensor-core beamforming backend whose plannin
 
 \section{Scope and Non-Goals}
 
-The initial scope is frequency-domain beamforming with complex steering weights on NVIDIA GPUs, distributed across multiple GPUs and nodes. The backend will operate on supplied channelized samples and weights. Acquisition hardware, channelization, calibration, weight generation, and complete telescope or radar pipelines are outside the scope, as are other accelerator vendors and heterogeneous clusters.
+The initial scope is frequency-domain beamforming with complex steering weights on NVIDIA GPUs, distributed across multiple GPUs and nodes. The backend will operate on supplied channelized samples and weights. Acquisition hardware, channelization, calibration, weight generation, post-processing of beam outputs such as power integration, and complete telescope or radar pipelines are outside the scope, as are other accelerator vendors and heterogeneous clusters.
 
 Linear scaling, or outperforming the baseline on every workload, is not required. Cases where communication-aware execution adds overhead or does not help will show when it is useful and what limits further scaling.
 

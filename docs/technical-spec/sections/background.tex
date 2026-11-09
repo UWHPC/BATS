@@ -200,9 +200,7 @@ Row $b$ of $W_f$ holds the weights of beam $b$, column $t$ of $X_f$ holds the sa
   \label{fig:per-channel-gemm}
 \end{figure}
 
-Some applications do not need the complex beam samples themselves and instead accumulate beam power, $\sum_t |y_{f,b}[t]|^2$, over an integration period. Such post-processing reduces the output volume significantly. The initial backend will produce complex beam samples; support for power integration may be considered later.
-
-% TODO: decide whether power integration is in scope for the first version.
+Some applications do not need the complex beam samples themselves and instead accumulate beam power, $\sum_t |y_{f,b}[t]|^2$, over an integration period. Such post-processing reduces the output volume significantly. The backend will produce complex beam samples; power integration is outside the scope (\cref{sec:scope-non-goals}).
 
 \subsubsection{Batched Complex GEMM}
 \label{sec:batched-complex-gemm}
@@ -318,7 +316,32 @@ In the ideal roofline model, workloads whose intensity is below the ratio of pea
 
 Other factors also limit performance. Small per-channel matrices may not provide enough parallel work to occupy the GPU, and launching many small kernels adds overhead. Matrix dimensions that are not multiples of the tensor-core tile sizes require padding or special handling at the boundaries, which wastes computation when $B$ or $S$ is small. If data originates in host memory, transfers over PCIe may dominate.
 
-% TODO: add a roofline figure for the target GPU with Workloads A and B marked.
+\Cref{fig:roofline} illustrates this for an H100 SXM with FP16 tensor-core inputs, which offers 989~TFLOP/s of dense throughput and 3.35~TB/s of memory bandwidth~\cite{h100Datasheet}, placing the ridge point at about 295~FLOP/byte. With $e = 4$ bytes per complex value, $S = 256$, and $T = 1024$, an example Workload~A with $B = 8$ has an intensity of about 15~FLOP/byte and is limited by memory bandwidth to about 5\% of peak, while an example Workload~B with $B = 1024$ reaches about 340~FLOP/byte, just past the ridge point.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}
+    \begin{loglogaxis}[
+      width=0.8\linewidth, height=6.2cm,
+      xmin=1, xmax=10000, ymin=1, ymax=3000,
+      xlabel={Arithmetic intensity $I$ (FLOP/byte)},
+      ylabel={Attainable TFLOP/s},
+      grid=major, grid style={gray!20},
+      tick label style={font=\small}, label style={font=\small},
+    ]
+      \addplot[thick,domain=1:295.2,samples=2] {3.35*x};
+      \addplot[thick,domain=295.2:10000,samples=2] {989};
+      \addplot[dashed,gray] coordinates {(295.2,1) (295.2,989)};
+      \node[font=\small,anchor=south,rotate=34] at (axis cs:12,48) {3.35 TB/s};
+      \node[font=\small,anchor=south] at (axis cs:2500,989) {989 TFLOP/s};
+      \addplot[only marks,mark=*,mark size=2.5pt] coordinates {(15.4,51.6) (341,989)};
+      \node[font=\small,anchor=north west] at (axis cs:15.4,51.6) {Workload A};
+      \node[font=\small,anchor=north west] at (axis cs:341,989) {Workload B};
+    \end{loglogaxis}
+  \end{tikzpicture}
+  \caption{Roofline for an H100 SXM with FP16 tensor-core inputs, with the example workloads from the text. The dashed line marks the ridge point.}
+  \label{fig:roofline}
+\end{figure}
 
 % ---------------------------------------------------------------------------
 \subsection{Multi-GPU and Multi-Node Execution}
@@ -335,8 +358,7 @@ Nodes are connected by a network such as InfiniBand or Ethernet. Network bandwid
 
 This hierarchy means that the same partitioning strategy can perform very differently depending on whether communication stays within a node or crosses the network.
 
-% TODO: describe the specific cluster hardware available to the team
-% (GPU models, NVLink topology, network type and bandwidth).
+Development and evaluation will use the GPU clusters of the Digital Research Alliance of Canada~\cite{allianceCan}, which provide NVIDIA H100 and H200 (Hopper) and B100 (Blackwell) GPUs. All three support FP16, BF16, and FP8 tensor-core inputs, and Blackwell adds narrower formats such as FP4. GPUs per node, NVLink connectivity, and the inter-node network differ between clusters, so the backend will identify the configuration at runtime (\cref{sec:hardware-topology-discovery}).
 
 \subsubsection{Communication Primitives}
 \label{sec:communication-primitives}
