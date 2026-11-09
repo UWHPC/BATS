@@ -58,7 +58,7 @@ Distributing either workload across more GPUs does not guarantee a proportional 
 
 \section{Core Hypothesis}
 
-We hypothesize that no single distribution strategy is best across beamforming workloads. When each GPU starts with a subset of sensors, partitioning by sensor must sum partial outputs that grow with the number of beams, while partitioning by channel must redistribute the input instead. We expect sensor partitioning to win when there are fewer beams than sensors, and channel partitioning to win otherwise.
+We hypothesize that no single distribution strategy is best across beamforming workloads. When each GPU starts with a subset of sensors, partitioning by sensor must sum partial outputs that grow with the number of beams, while partitioning by channel must redistribute the input instead. We expect sensor partitioning to win when there are fewer beams than sensors per GPU, and channel partitioning to win otherwise.
 
 A planner that chooses the strategy from the workload, data placement, and interconnect should then outperform the best single fixed strategy. The hypothesis is refuted if one fixed strategy performs within a preset tolerance of the best measured strategy on every tested configuration.
 

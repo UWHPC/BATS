@@ -379,10 +379,27 @@ The batched GEMM can be divided among $P$ GPUs along any of its four dimensions.
   \item \textbf{By time.} Each GPU processes a contiguous range of samples. Weights must be replicated, and, like channel partitioning, each GPU needs all sensors for its time range.
 \end{itemize}
 
-These strategies can also be combined, for example partitioning by channel across nodes and by beam within a node. Which choice is cheapest depends on the workload dimensions and data placement, as stated in the core hypothesis (\cref{sec:core-hypothesis}).
+These strategies can also be combined, for example partitioning by channel across nodes and by beam within a node.
 
-% TODO: add a table giving communication volume per strategy as a function of
-% B, S, T, F, and P, under a stated assumption about initial data placement.
+\Cref{tab:communication-volume} gives the volume each GPU must send under each strategy. It assumes that each GPU starts with $S/P$ sensors for all channels and samples, that weights are placed in advance (\cref{sec:complex-steering-weights}), that outputs may remain distributed across GPUs, and that collectives use bandwidth-optimal algorithms.
+
+\begin{table}[H]
+  \centering
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    Strategy & Communication & Values sent per GPU \\
+    \midrule
+    By channel & all-to-all of input & $STF\,(P-1)/P^2$ \\
+    By beam    & all-gather of input & $STF\,(P-1)/P$ \\
+    By sensor  & reduce-scatter of partial outputs & $BTF\,(P-1)/P$ \\
+    By time    & all-to-all of input & $STF\,(P-1)/P^2$ \\
+    \bottomrule
+  \end{tabular}
+  \caption{Complex values sent per GPU for each partitioning strategy.}
+  \label{tab:communication-volume}
+\end{table}
+
+Comparing the channel and sensor rows, sensor partitioning sends less data when $B < S/P$, the condition stated in the core hypothesis (\cref{sec:core-hypothesis}). Volume is not the only cost: per-message latency, link bandwidth, and the topology between participants (\cref{sec:interconnects}) also affect which strategy is fastest.
 
 \subsubsection{Communication--Computation Overlap}
 \label{sec:communication-computation-overlap}
