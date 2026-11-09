@@ -358,7 +358,7 @@ Nodes are connected by a network such as InfiniBand or Ethernet. Network bandwid
 
 This hierarchy means that the same partitioning strategy can perform very differently depending on whether communication stays within a node or crosses the network.
 
-Development and evaluation will use the GPU clusters of the Digital Research Alliance of Canada~\cite{allianceCan}, which provide NVIDIA H100 and H200 (Hopper) GPUs. Both support FP16, BF16, and FP8 tensor-core inputs. GPUs per node, NVLink connectivity, and the inter-node network differ between clusters, so the backend will identify the configuration at runtime (\cref{sec:hardware-topology-discovery}).
+Development and evaluation will use GPU clusters with NVIDIA H100 and H200 (Hopper) GPUs. Both support FP16, BF16, and FP8 tensor-core inputs. GPUs per node, NVLink connectivity, and the inter-node network differ between clusters, so the backend will identify the configuration at runtime (\cref{sec:hardware-topology-discovery}).
 
 \subsubsection{Communication Primitives}
 \label{sec:communication-primitives}
