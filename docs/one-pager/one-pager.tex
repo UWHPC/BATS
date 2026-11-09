@@ -64,7 +64,7 @@ A planner that chooses the strategy from the workload, data placement, and inter
 
 \section{Project Goal}
 
-The goal is to build a distributed tensor-core beamforming backend whose planning step selects a distribution strategy from workload and hardware context, and to use it to test this hypothesis, including the cost of planning. The project will build single-GPU and distributed baselines, profile them to find what limits scaling, develop communication-aware strategies in response, and evaluate them against tuned static strategies (see the full technical specification).
+The goal is to build a distributed tensor-core beamforming backend whose planning step selects a distribution strategy from workload and hardware context, and to use it to test this hypothesis, including the cost of planning.
 
 \section{Scope and Non-Goals}
 
@@ -74,7 +74,7 @@ Linear scaling, or outperforming the baseline on every workload, is not required
 
 \section{Milestones}
 
-(1)~Single-GPU tensor-core beamformer, validated and benchmarked against reference implementations; (2)~reproducible distributed baseline within and across nodes; (3)~scaling and communication study identifying the main limitations; (4)~communication-aware strategies and planning step; (5)~final analysis assessing the core hypothesis. Target dates are not yet fixed; see the full technical specification for completion criteria.
+(1)~Single-GPU tensor-core beamformer, validated and benchmarked against reference implementations; (2)~reproducible distributed baseline within and across nodes; (3)~scaling and communication study identifying the main limitations; (4)~communication-aware strategies and planning step; (5)~final analysis assessing the core hypothesis. Target dates are not yet fixed. The full technical specification gives the detailed approach, evaluation method, and completion criteria for each milestone.
 
 \vspace{1pt}\hrule\vspace{1pt}
 {\setlength{\parskip}{0pt}\printbibliography[heading=none]}
