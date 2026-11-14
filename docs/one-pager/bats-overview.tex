@@ -1,0 +1,61 @@
+\documentclass[10pt,letterpaper]{article}
+\usepackage[letterpaper,margin=0.75in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{parskip}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\setlist{nosep,leftmargin=1.2em}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{8pt}{2pt}
+\titleformat*{\section}{\large\bfseries}
+\pagestyle{empty}
+
+\begin{document}
+
+{\LARGE\bfseries BATS: Beamforming Across Tensor-core Systems\par}
+\vspace{2pt}
+{\large Project overview \hfill UWHPC \textperiodcentered{} Working draft, \today\par}
+\vspace{-4pt}
+\noindent\rule{\linewidth}{0.6pt}
+
+\section*{What}
+BATS is a distributed GPU beamforming backend. Beamforming combines signals from an array of sensors (antennas, microphones, ultrasound probes) so the array ``listens'' in chosen directions. With frequency channels, forming $B$ beams from $S$ sensors is a batched complex matrix multiply,
+\[
+  Y_f = W_f X_f \qquad (B \times T) = (B \times S)(S \times T)\ \text{for each channel } f,
+\]
+which maps well onto GPU tensor cores.
+
+\section*{Why}
+Fast single-GPU tensor-core beamforming already exists: the Tensor-Core Beamformer (Oostrum et al., IPDPS 2025) reaches hundreds of TeraOps/s on one GPU. A single GPU still has limited compute, memory, and bandwidth. Spreading the work across GPUs and nodes adds capacity but also adds communication and synchronization, and the right way to split the work depends on the workload:
+\begin{itemize}
+  \item \textbf{Few beams} means little computation per input sample, so data movement dominates.
+  \item \textbf{Many beams} means each sample is reused many times, so the work is compute-bound and suits tensor cores.
+\end{itemize}
+
+\section*{Hypothesis}
+No single way of splitting the work is best everywhere. If each GPU starts with a subset of sensors, splitting by sensor wins when there are fewer beams than sensors, and splitting by channel wins otherwise. A planner that picks the split from the workload, data placement, and interconnect should beat the best fixed strategy. \emph{Refuted if} one fixed strategy is within a preset tolerance of the best everywhere.
+
+\section*{Plan}
+\begin{enumerate}
+  \item \textbf{Single-GPU beamformer}: a CUDA/C++ tensor-core kernel, checked against a double-precision reference and benchmarked against cuBLAS and the Tensor-Core Beamformer.
+  \item \textbf{Distributed baseline}: one simple partitioning (e.g.\ by channel) across GPUs and nodes using MPI/NCCL, with a reproducible benchmark harness.
+  \item \textbf{Scaling study}: sweep beams, sensors, channels, samples, and GPU/node counts, then profile with Nsight to find where compute, memory, communication, or synchronization limits scaling.
+  \item \textbf{Communication-aware execution}: context-dependent partitioning, communication--computation overlap, and choosing how many GPUs and nodes to use, each compared against tuned static versions.
+  \item \textbf{Analysis and documentation}: when and why each strategy helps, with reproducible results.
+\end{enumerate}
+
+\section*{How it will be judged}
+Accuracy against a double-precision reference; throughput, per-block latency, and strong/weak scaling efficiency; and the one-time cost of planning, including how many sample blocks it takes to pay off. Gains must hold against tuned static strategies with the same kernel, precision, and data placement, not just against a naive baseline.
+
+\section*{Scope}
+\textbf{In:} frequency-domain beamforming with supplied channelized samples and weights, on NVIDIA GPUs across multiple nodes.
+\textbf{Out:} acquisition hardware, channelization, calibration, weight generation, full instrument pipelines, other GPU vendors, and heterogeneous clusters. Linear scaling is not required; finding where distribution stops helping is itself a result.
+
+\vfill
+\small Full technical specification: \url{https://github.com/UWHPC/BATS/tree/main/docs/technical-spec}
+
+\end{document}
