@@ -108,7 +108,7 @@ The time-shift property of the Fourier transform states that
 
 When a channel is narrow enough that the delay $\tau$ is small relative to the inverse of the channel bandwidth, the delay can be approximated within that channel by a single phase rotation evaluated at the channel's centre frequency. This narrowband approximation turns the delay of each sensor into one complex multiplication per sample.
 
-The backend will receive already-channelized complex samples (\cref{sec:scope-non-goals}), indexed by channel, sensor, and time, stored as contiguous per-channel matrices with real and imaginary parts kept separately. How data-layout costs are counted in comparisons is defined in \cref{sec:evaluation}.
+The backend will receive already-channelized complex samples (\cref{sec:scope-non-goals}), indexed by channel, time, and sensor, stored as contiguous per-channel matrices. Within each channel, every time sample holds the real parts of all sensors followed by their imaginary parts, so the stacked real and imaginary inputs of \cref{eq:complex-block} form a single matrix with the sensor dimension contiguous. How data-layout costs are counted in comparisons is defined in \cref{sec:evaluation}.
 
 \subsubsection{Complex Steering Weights}
 \label{sec:complex-steering-weights}

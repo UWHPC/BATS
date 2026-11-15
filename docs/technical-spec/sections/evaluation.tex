@@ -6,7 +6,7 @@ Each comparison will fix a common starting layout and ownership for samples and 
 \subsection{Numerical Correctness}
 \label{sec:numerical-correctness}
 
-Every implementation will be compared with the double-precision reference on identical inputs and weights. Distributed implementations will also be compared with the single-GPU implementation at the same precision, separating errors caused by distribution from those caused by reduced precision.
+Every implementation will be compared with the FP32 cuBLAS reference (\cref{sec:establishing-baselines}) on identical inputs and weights. FP32 rounding error is several orders of magnitude below that of TF32, FP16, BF16, and FP8, so it is a sufficient reference for every precision evaluated. Distributed implementations will also be compared with the single-GPU implementation at the same precision, separating errors caused by distribution from those caused by reduced precision.
 
 Accuracy will be measured by the relative error of the complete output,
 
