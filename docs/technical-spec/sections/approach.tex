@@ -1,0 +1,30 @@
+\section{Proposed Approach}
+\label{sec:proposed-approach}
+
+
+\subsection{Establishing Baselines}
+\label{sec:establishing-baselines}
+
+A double-precision reference beamformer computing \cref{eq:steering-weights} will be used only to check correctness. Batched complex GEMM from cuBLAS~\cite{cublasDocs} will provide a single-GPU performance reference, and the Tensor-Core Beamformer~\cite{oostrum2025tcbf} will be evaluated as an existing tensor-core reference.
+
+The project will then implement a single-GPU tensor-core beamformer in CUDA/C++. It will use one of the complex formulations in \cref{sec:complex-arithmetic-on-tensor-cores} and a precision chosen according to the available hardware and the accuracy requirements in \cref{sec:numerical-correctness}. CUTLASS~\cite{cutlass} or direct tensor-core instructions will be used where library interfaces do not give enough control.
+
+A simple distributed baseline will partition the work one way, for example by channel, using blocking communication through MPI~\cite{mpiStandard} or NCCL~\cite{ncclDocs} and no overlap. It will be supplemented by tuned static strategies, including overlap where beneficial. A static strategy may be tuned for a workload configuration, but its choices are then fixed for that configuration.
+
+All implementations will share a documented input format and a workload generator. The generator will produce synthetic sensor data and weights, including signals from known directions whose beam outputs can be computed independently. A benchmark harness will record workload dimensions, hardware and software configuration, and timings so measurements can be repeated.
+
+\subsection{Investigating Scaling and Communication Effects}
+\label{sec:investigating-scaling-and-communication-effects}
+
+Profiling will sweep the number of beams, sensors, channels, and samples per block, together with GPU and node counts and numerical precision. Both strong scaling, in which a fixed workload runs on more GPUs, and weak scaling, in which the workload grows with the GPU count, will be examined. Where possible, one dimension will vary while the others are held fixed, separating effects of arithmetic intensity from those of data volume and communication.
+
+Nsight Systems~\cite{nsightSystems} will show how execution time divides between computation, memory operations, host--device transfers, inter-GPU communication, and synchronization. Nsight Compute~\cite{nsightCompute} will show tensor-core utilization and achieved memory bandwidth for individual kernels. These measurements will be related to the arithmetic-intensity analysis in \cref{sec:workload-dimensions-and-arithmetic-intensity} and the roofline model in \cref{sec:performance-implications}.
+
+\subsection{Developing Communication-Aware Execution}
+\label{sec:developing-communication-aware-execution}
+
+After finding where distributed execution loses efficiency, the project will implement focused alternatives. Candidates include choosing the partitioning from workload dimensions and data placement, overlapping communication with computation using streams and pipelined sample blocks, and using fewer GPUs or nodes when communication would dominate.
+
+Each candidate will first be tested on its own against the distributed baseline, then combined with other successful candidates. Where the best strategy depends on context, the project will test how to choose it, starting with a simple cost model or selection rules and considering measured autotuning if those prove unreliable.
+
+Successful strategies will become part of the backend. The backend will separate a planning step, which gathers context and selects a strategy, from an execution step, which processes sample blocks with the selected plan. The baseline strategy will remain available for comparison and for configurations the specialized strategies do not support.

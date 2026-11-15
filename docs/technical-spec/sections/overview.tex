@@ -1,0 +1,40 @@
+\section{Project Overview}
+\label{sec:project-overview}
+
+\subsection{Motivation}
+\label{sec:motivation}
+
+Beamforming combines signals from an array of sensors, using complex weights so that signals from a chosen direction add constructively while others are attenuated~\cite{vanVeen1988beamforming}. Different weight sets let the same sensor data form many beams at once, supporting applications such as radio astronomy, radar, medical ultrasound, and wireless communications.
+
+Forming many beams across frequency channels can be expressed as matrix multiplication, which GPU tensor cores accelerate~\cite{cudaProgrammingGuide}. The Tensor-Core Beamformer~\cite{oostrum2025tcbf} has shown that tensor cores make single-GPU beamforming fast and energy efficient. A single GPU, however, has limited compute throughput, memory capacity, and bandwidth.
+
+\subsection{Problem Statement}
+\label{sec:problem-statement}
+
+The cost of beamforming depends on the number of sensors, beams, frequency channels, and samples processed at once. These dimensions set both the amount of computation and the volume of data that must be stored and moved. Consider two workloads using the same sensor array:
+
+\begin{itemize}
+  \item \textbf{Workload A} forms a small number of beams. There is little computation per input sample, so memory access and data transfers may dominate execution.
+  \item \textbf{Workload B} forms many beams from the same input signals. Reusing each sample across more beams increases the computation per sample and makes better use of tensor cores.
+\end{itemize}
+
+Distributing either workload across more GPUs does not guarantee a proportional improvement. Each GPU does less computation, but inputs may need to be redistributed and outputs collected, and crossing node boundaries adds network costs. Performance depends on how the work is partitioned, where the data starts, and where the outputs are needed.
+
+\subsection{Core Hypothesis}
+\label{sec:core-hypothesis}
+
+We hypothesize that no single distribution strategy is best across beamforming workloads. When each GPU starts with a subset of sensors, partitioning by sensor must sum partial outputs that grow with the number of beams, while partitioning by channel must redistribute the input instead. We expect sensor partitioning to win when there are fewer beams than sensors per GPU ($B < S/P$), and channel partitioning to win otherwise.
+
+A planner that chooses the strategy from the workload, data placement, and interconnect should then outperform the best single fixed strategy. The hypothesis is refuted if one fixed strategy performs within a preset tolerance of the best measured strategy on every tested configuration.
+
+\subsection{Project Goal}
+\label{sec:project-goal}
+
+The goal is to build a distributed tensor-core beamforming backend whose planning step selects a distribution strategy from workload and hardware context, and to use it to test this hypothesis, including the cost of planning. The project will build single-GPU and distributed baselines, profile them to find what limits scaling, develop communication-aware strategies in response, and evaluate them against tuned static strategies (\cref{sec:proposed-approach,sec:evaluation}).
+
+\subsection{Scope and Non-Goals}
+\label{sec:scope-non-goals}
+
+The initial scope is frequency-domain beamforming with complex steering weights on NVIDIA GPUs, distributed across multiple GPUs and nodes. The backend will operate on supplied channelized samples and weights. Acquisition hardware, channelization, calibration, weight generation, post-processing of beam outputs such as power integration, and complete telescope or radar pipelines are outside the scope, as are other accelerator vendors and heterogeneous clusters.
+
+Linear scaling, or outperforming the baseline on every workload, is not required. Cases where communication-aware execution adds overhead or does not help will show when it is useful and what limits further scaling.

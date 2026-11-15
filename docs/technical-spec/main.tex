@@ -1,0 +1,138 @@
+\documentclass[11pt,letterpaper]{article}
+
+% ---------------------------------------------------------------------------
+% Page geometry
+% ---------------------------------------------------------------------------
+\usepackage[letterpaper,margin=1.25in,headheight=14pt]{geometry}
+
+% ---------------------------------------------------------------------------
+% Typography and language
+% ---------------------------------------------------------------------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[english]{babel}
+\usepackage{microtype}
+\usepackage{parskip}
+
+% ---------------------------------------------------------------------------
+% Mathematics
+% ---------------------------------------------------------------------------
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+
+% ---------------------------------------------------------------------------
+% Figures and tables
+% ---------------------------------------------------------------------------
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\graphicspath{{figures/}}
+
+% ---------------------------------------------------------------------------
+% Code listings
+% ---------------------------------------------------------------------------
+\usepackage{listings}
+
+% ---------------------------------------------------------------------------
+% Bibliography
+% ---------------------------------------------------------------------------
+\usepackage{csquotes}
+\usepackage{xurl}
+\usepackage[backend=biber,style=numeric,sorting=none]{biblatex}
+\setcounter{biburlnumpenalty}{100}
+\setcounter{biburlucpenalty}{100}
+\setcounter{biburllcpenalty}{100}
+\addbibresource{references.bib}
+
+% ---------------------------------------------------------------------------
+% Cross-references and hyperlinks (load late, before cleveref)
+% ---------------------------------------------------------------------------
+\usepackage[hidelinks]{hyperref}
+\usepackage{cleveref}
+
+% ---------------------------------------------------------------------------
+% Headers and footers
+% ---------------------------------------------------------------------------
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{BATS Technical Specification}
+\fancyhead[R]{UWHPC}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\fancypagestyle{plain}{%
+  \fancyhf{}
+  \fancyfoot[C]{\thepage}
+  \renewcommand{\headrulewidth}{0pt}
+}
+
+% ---------------------------------------------------------------------------
+% Document metadata
+% ---------------------------------------------------------------------------
+\title{BATS: Beamforming Technical Specification}
+\author{Alyan Salamat \and Shpat Sahiti}
+\date{November 9, 2026}
+
+\hypersetup{
+  pdftitle={BATS: Beamforming Technical Specification},
+  pdfauthor={Alyan Salamat, Shpat Sahiti},
+  pdfsubject={Beamforming Across Tensor-core Systems},
+}
+
+\begin{document}
+
+% ---------------------------------------------------------------------------
+% Title page
+% ---------------------------------------------------------------------------
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+  \centering
+  \vspace*{3cm}
+
+  {\Huge\bfseries BATS\par}
+  \vspace{1cm}
+  {\Large Beamforming Across Tensor-core Systems\par}
+
+  \vspace{3cm}
+  {\large Project Leads: Alyan Salamat, Shpat Sahiti\par}
+  \vspace{0.5cm}
+  {\large UW High Performance Computing (UWHPC)\par}
+
+  \vfill
+
+  {\large\itshape v1\par}
+  \vspace{0.5cm}
+  {\large November 9, 2026\par}
+
+\end{titlepage}
+\hypersetup{pageanchor=true}
+
+\pagenumbering{roman}
+\tableofcontents
+\newpage
+\pagenumbering{arabic}
+
+% ---------------------------------------------------------------------------
+% Content
+% ---------------------------------------------------------------------------
+\input{sections/overview.tex}
+\input{sections/background.tex}
+\input{sections/approach.tex}
+\input{sections/evaluation.tex}
+\input{sections/milestones.tex}
+
+% ---------------------------------------------------------------------------
+% Bibliography
+% ---------------------------------------------------------------------------
+\printbibliography
+
+\end{document}

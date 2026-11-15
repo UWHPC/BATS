@@ -1,0 +1,62 @@
+\section{Evaluation}
+\label{sec:evaluation}
+
+Each comparison will fix a common starting layout and ownership for samples and weights, and a common required layout and ownership for outputs. Any packing, transposition, padding, copies, redistribution, or output transfers a strategy needs will be counted. Reusable preparation will be counted as planning cost (\cref{sec:context-and-decision-overhead}). Host--device transfers will be included when the stated input or output boundary is in host memory; GPU-resident measurements will be labelled separately.
+
+\subsection{Numerical Correctness}
+\label{sec:numerical-correctness}
+
+Every implementation will be compared with the double-precision reference on identical inputs and weights. Distributed implementations will also be compared with the single-GPU implementation at the same precision, separating errors caused by distribution from those caused by reduced precision.
+
+Accuracy will be measured by the relative error of the complete output,
+
+\[
+  \varepsilon_{\mathrm{rel}} =
+  \frac{\lVert Y_{\mathrm{candidate}} - Y_{\mathrm{reference}} \rVert_F}
+       {\lVert Y_{\mathrm{reference}} \rVert_F},
+\]
+
+where $\lVert\cdot\rVert_F$ is the Frobenius norm, together with the maximum elementwise error. Tolerances will be documented for each supported precision and justified against the precision of typical sensor data. NaN, infinity, and integer overflow will be checked separately, since they need special handling in numerical comparisons.
+
+Test inputs will include random data, synthetic plane-wave sources from known directions, for which the steered beam should recover the source with the expected gain, and boundary cases. Boundary cases will include dimensions that are not multiples of the tensor-core tile sizes, a single beam or sensor, and dimensions that are not divisible by the number of GPUs.
+
+\subsection{Performance Measurement}
+\label{sec:performance-measurement}
+
+Measurements will report throughput, latency, and scaling efficiency. Throughput will be reported as sample blocks or beam samples per second, and as achieved operations per second relative to the hardware peak.
+
+For a configuration using $P$ GPUs with execution time $T_P$, and a single-GPU execution time $T_1$ on the same workload, strong-scaling efficiency is
+
+\[
+  E_{\mathrm{strong}}(P) = \frac{T_1}{P\,T_P}.
+\]
+
+For weak scaling, let $W$ denote the one-GPU workload and $PW$ a workload with $P$ times the useful work. Efficiency is
+
+\[
+  E_{\mathrm{weak}}(P) = \frac{T_1(W)}{T_P(PW)}.
+\]
+
+Ideal weak scaling keeps the execution time constant, giving an efficiency of one. The initial weak-scaling sweep will grow the channel count as $F_P = P F_1$ while holding $B$, $S$, and $T$ fixed, since adding channels does not change arithmetic intensity (\cref{eq:arithmetic-intensity}). Speedup of a candidate over a baseline is $T_{\mathrm{base}}/T_{\mathrm{candidate}}$, where a value greater than one indicates an improvement.
+
+GPU work and communication can continue after the CPU call returns, so a CPU timer alone may stop too early. Measurements will use GPU timing events or wait for completion on all participating ranks. Timestamps from different GPUs will not be compared as though they shared a clock. Warm-up runs will precede measurements, and repeated trials will be summarized using a stated statistic and a measure of variability. Results will be reported for kernel execution alone and for the backend across the stated input and output boundaries, together with the hardware, software versions, and workload dimensions.
+
+Pipelined runs will report steady-state throughput, per-block latency, and pipeline startup and drain costs separately. Steady-state throughput counts completed blocks over an interval after the pipeline has filled. Block latency runs from a block being available at the input boundary to its outputs being ready, including queueing inside the backend; the interval between completed blocks is not a substitute. Throughput runs will not add synchronization between stages just to obtain stage timings, since that would remove the overlap being measured. Separate diagnostic runs may do so, but their timings will not be presented as overlapped performance.
+
+\subsection{Context and Decision Overhead}
+\label{sec:context-and-decision-overhead}
+
+Let $T_{\mathrm{plan}}$ be the one-time cost of topology discovery, planning, and any benchmarking used to select a strategy, measured separately from steady-state execution. With per-block execution times $t_{\mathrm{base}}$ and $t_{\mathrm{candidate}}$, the candidate becomes worthwhile after
+
+\[
+  N > \frac{T_{\mathrm{plan}}}{t_{\mathrm{base}} - t_{\mathrm{candidate}}}
+\]
+
+blocks, when $t_{\mathrm{candidate}} < t_{\mathrm{base}}$. The denominator is the time saved on each block. Results will report total time as a function of the number of blocks processed, together with any additional memory a strategy requires.
+
+\subsection{Interpreting Results}
+\label{sec:interpreting-results}
+
+Results will be explained in terms of workload dimensions, arithmetic intensity, and interconnect characteristics, not only reported as speedups.
+
+The core hypothesis (\cref{sec:core-hypothesis}) will be tested by comparing the planner with the best fixed strategy across the evaluation suite and with the best measured strategy for each configuration. The tolerance will be fixed before the experiments are run. These comparisons will use the same local kernel and numerical formats, so that kernel or precision changes are not attributed to strategy selection. Results will also separate gains at a fixed resource count from gains due to using more or fewer GPUs or nodes, and will report resource use alongside latency and throughput. Limitations, such as the use of synthetic data and the range of hardware available, will be stated with the results.
