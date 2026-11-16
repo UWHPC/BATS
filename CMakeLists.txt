@@ -23,15 +23,4 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 23)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-set(XPU_ENABLE_CUDA ${BATS_ENABLE_CUDA} CACHE BOOL "Enable xpu's CUDA backend" FORCE)
-
-include(FetchContent)
-FetchContent_Declare(
-  xpu
-  GIT_REPOSITORY https://github.com/UWHPC/xpu.git
-  GIT_TAG 81a3a7b756e6decc0e2068eaf6c8fc23852fa682
-)
-FetchContent_MakeAvailable(xpu)
-
 add_executable(bats src/main.cpp)
-target_link_libraries(bats PRIVATE xpu::xpu)
