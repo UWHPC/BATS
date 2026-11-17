@@ -89,7 +89,7 @@ This is a \textbf{batched complex GEMM} with batch count $F$. The work is $8BSTF
   \item \textbf{Input layout: $[f][t][s]$, split per sample.} Within each channel, every time sample stores the real parts of all $S$ sensors followed by their imaginary parts. This is exactly $[X_r; X_i]$ as a $2S \times T$ column-major matrix with the sensor ($K$) dimension contiguous, so TF32 \texttt{wgmma} reads it with no transpose or copy. Station data usually arrives time-ordered per sensor, so ingest needs one reorder, counted as a layout cost. cuBLAS needs interleaved complex, so the test harness converts for the reference (a test-only cost).
   \item \textbf{Input data:} weights and samples are supplied. Channelization, calibration, and weight generation are out of scope.
   \item \textbf{CUTLASS as a git submodule,} pinned to tag \texttt{v4.8.1}.
-  \item \textbf{GoogleTest} for correctness tests, integrated with CTest.
+  \item \textbf{Catch2} for correctness tests, integrated with CTest.
   \item \textbf{Layout costs count:} any packing, transposition, padding, or copies a method needs are included in its timing (spec, Evaluation).
 \end{itemize}
 
@@ -181,7 +181,7 @@ Researched against the CUTLASS repository on 14 November 2026.
     \item dimensions that are not multiples of the tile sizes;
     \item $B = 1$ and $S = 1$.
   \end{itemize}
-  \item GoogleTest with \texttt{gtest\_discover\_tests}; parameterized tests over dimensions and precisions.
+  \item Catch2 with \texttt{catch\_discover\_tests}; tests over dimensions and precisions via \texttt{GENERATE} and \texttt{TEMPLATE\_TEST\_CASE}.
 \end{todo}
 
 \subsection*{Benchmarking}
@@ -203,9 +203,9 @@ Researched against the CUTLASS repository on 14 November 2026.
 
 \section*{Suggested Order}
 \begin{enumerate}
-  \item CMake project skeleton with CUDA, GoogleTest, and CUTLASS v4.8.1 (git submodule) building for \texttt{sm\_90a}, and a CUTLASS 3.x Hopper TF32 GEMM example running on our GPU.
+  \item CMake project skeleton with CUDA, Catch2, and CUTLASS v4.8.1 (git submodule) building for \texttt{sm\_90a}, and a CUTLASS 3.x Hopper TF32 GEMM example running on our GPU.
   \item Precision type alias and traits, \texttt{mdspan} view types for the strided batch, and workload generator.
-  \item FP32 cuBLAS reference (with layout conversion) and GoogleTest correctness harness.
+  \item FP32 cuBLAS reference (with layout conversion) and Catch2 correctness harness.
   \item Block weight-matrix construction.
   \item TF32 block-formulation kernel: CUTLASS 3.x real GEMM, batched over channels through the $L$ mode, fed from the views and passing the correctness tests.
   \item cuBLAS TF32 speed comparison.

@@ -2,35 +2,39 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: ./bats {build|run} [--cuda]" >&2
+  echo "Usage: ./bats {build|run|test} [--arch <sm>]" >&2
+  echo "  --arch <sm>  CUDA architecture to build for (default 90a, e.g. 89 or native)" >&2
   exit 2
 }
 
 action=${1:-}
 case "$action" in
-  build|run) shift ;;
+  build|run|test) shift ;;
   *) usage ;;
 esac
 
-cuda=OFF
-if [[ ${1:-} == --cuda ]]; then
-  cuda=ON
-  shift
-fi
-[[ $# -eq 0 ]] || usage
+arch=90a
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --arch) [[ $# -ge 2 ]] || usage; arch=$2; shift 2 ;;
+    *) usage ;;
+  esac
+done
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-if [[ $cuda == ON ]]; then
-  build_dir="$root/build-cuda"
-else
-  build_dir="$root/build-cpu"
+build_dir="$root/build"
+
+# nvcc is often installed without being on PATH.
+if [[ -z ${CUDACXX:-} ]] && ! command -v nvcc >/dev/null && [[ -x /usr/local/cuda/bin/nvcc ]]; then
+  export CUDACXX=/usr/local/cuda/bin/nvcc
 fi
 
 cmake -S "$root" -B "$build_dir" \
-  -DBATS_ENABLE_CUDA="$cuda" \
-  -DCMAKE_CXX_COMPILER=g++-15
+  -DCMAKE_CXX_COMPILER=g++-15 \
+  -DCMAKE_CUDA_ARCHITECTURES="$arch"
 cmake --build "$build_dir" --parallel
 
-if [[ $action == run ]]; then
-  "$build_dir/bats"
-fi
+case "$action" in
+  run) "$build_dir/bats" ;;
+  test) ctest --test-dir "$build_dir" --output-on-failure ;;
+esac
