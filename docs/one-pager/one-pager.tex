@@ -1,0 +1,82 @@
+\documentclass[10pt,letterpaper]{article}
+
+\usepackage[letterpaper,margin=0.6in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[english]{babel}
+\usepackage{microtype}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{csquotes}
+\usepackage{xurl}
+\usepackage[backend=biber,style=numeric,sorting=none,maxbibnames=2,url=false,doi=false,eprint=false,isbn=false]{biblatex}
+\AtEveryBibitem{\clearfield{urlyear}\clearfield{urlmonth}\clearfield{urlday}\clearfield{pages}\clearfield{url}}
+\setlength{\bibitemsep}{0pt}
+\setlength{\biblabelsep}{4pt}
+\addbibresource{../technical-spec/references.bib}
+\renewcommand*{\bibfont}{\footnotesize}
+\usepackage[hidelinks]{hyperref}
+
+\hypersetup{
+  pdftitle={BATS: Project Overview},
+  pdfauthor={Alyan Salamat, Shpat Sahiti},
+  pdfsubject={Beamforming Across Tensor-core Systems},
+}
+
+\titleformat{\section}{\normalsize\bfseries}{}{0pt}{}
+\titlespacing*{\section}{0pt}{6pt}{1pt}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{3pt}
+\setlist{nosep,leftmargin=1.5em}
+\pagestyle{empty}
+
+\begin{document}
+
+\begin{center}
+  {\Large\bfseries BATS: Beamforming Across Tensor-core Systems}\\[3pt]
+  {\large Project Overview}\\[5pt]
+  Project Leads: Alyan Salamat, Shpat Sahiti \quad$\cdot$\quad UW High Performance Computing (UWHPC)\\[1pt]
+  v1 \quad$\cdot$\quad November 9, 2026
+\end{center}
+\vspace{-4pt}\hrule\vspace{2pt}
+
+\section{Motivation}
+
+Beamforming combines signals from an array of sensors, using complex weights so that signals from a chosen direction add constructively while others are attenuated~\cite{vanVeen1988beamforming}. Different weight sets let the same sensor data form many beams at once, supporting applications such as radio astronomy, radar, medical ultrasound, and wireless communications.
+
+Forming many beams across frequency channels can be expressed as matrix multiplication, which GPU tensor cores accelerate~\cite{cudaProgrammingGuide}. The Tensor-Core Beamformer~\cite{oostrum2025tcbf} has shown that tensor cores make single-GPU beamforming fast and energy efficient. A single GPU, however, has limited compute throughput, memory capacity, and bandwidth.
+
+\section{Problem Statement}
+
+The cost of beamforming depends on the number of sensors, beams, frequency channels, and samples processed at once. These dimensions set both the amount of computation and the volume of data that must be stored and moved. Consider two workloads using the same sensor array:
+\begin{itemize}
+  \item \textbf{Workload A} forms a small number of beams. There is little computation per input sample, so memory access and data transfers may dominate execution.
+  \item \textbf{Workload B} forms many beams from the same input signals. Reusing each sample across more beams increases the computation per sample and makes better use of tensor cores.
+\end{itemize}
+Distributing either workload across more GPUs does not guarantee a proportional improvement. Each GPU does less computation, but inputs may need to be redistributed and outputs collected, and crossing node boundaries adds network costs. Performance depends on how the work is partitioned, where the data starts, and where the outputs are needed.
+
+\section{Core Hypothesis}
+
+We hypothesize that no single distribution strategy is best across beamforming workloads. When each GPU starts with a subset of sensors, partitioning by sensor must sum partial outputs that grow with the number of beams, while partitioning by channel must redistribute the input instead. We expect sensor partitioning to win when there are fewer beams than sensors per GPU, and channel partitioning to win otherwise.
+
+A planner that chooses the strategy from the workload, data placement, and interconnect should then outperform the best single fixed strategy. The hypothesis is refuted if one fixed strategy performs within a preset tolerance of the best measured strategy on every tested configuration.
+
+\section{Project Goal}
+
+The goal is to build a distributed tensor-core beamforming backend whose planning step selects a distribution strategy from workload and hardware context, and to use it to test this hypothesis, including the cost of planning.
+
+\section{Scope and Non-Goals}
+
+The initial scope is frequency-domain beamforming with complex steering weights on NVIDIA GPUs, distributed across multiple GPUs and nodes. The backend will operate on supplied channelized samples and weights. Acquisition hardware, channelization, calibration, weight generation, post-processing of beam outputs such as power integration, and complete telescope or radar pipelines are outside the scope, as are other accelerator vendors and heterogeneous clusters.
+
+Linear scaling, or outperforming the baseline on every workload, is not required. Cases where communication-aware execution adds overhead or does not help will show when it is useful and what limits further scaling.
+
+\section{Milestones}
+
+(1)~Single-GPU tensor-core beamformer, validated and benchmarked against reference implementations; (2)~reproducible distributed baseline within and across nodes; (3)~scaling and communication study identifying the main limitations; (4)~communication-aware strategies and planning step; (5)~final analysis assessing the core hypothesis. Target dates are not yet fixed. The full technical specification gives the detailed approach, evaluation method, and completion criteria for each milestone.
+
+\vspace{1pt}\hrule\vspace{1pt}
+{\setlength{\parskip}{0pt}\printbibliography[heading=none]}
+
+\end{document}

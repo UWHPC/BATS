@@ -1,0 +1,229 @@
+\documentclass[10pt,letterpaper]{article}
+\usepackage[letterpaper,margin=0.75in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{parskip}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{xurl}
+\setlist{nosep,leftmargin=1.4em}
+\newlist{todo}{itemize}{2}
+\setlist[todo]{label=$\square$,nosep,leftmargin=1.6em}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{10pt}{3pt}
+\titlespacing*{\subsection}{0pt}{8pt}{2pt}
+\titleformat*{\section}{\large\bfseries}
+\titleformat*{\subsection}{\normalsize\bfseries}
+
+\begin{document}
+
+{\LARGE\bfseries BATS: Stage 1 Implementation Notes\par}
+\vspace{2pt}
+{\large Single-GPU tensor-core beamformer \hfill UWHPC \textperiodcentered{} Working draft, \today\par}
+\vspace{-4pt}
+\noindent\rule{\linewidth}{0.6pt}
+
+Working notes for researching how to build Milestone~1 of the technical specification. They cover what stage~1 includes, what is already decided, and what still needs research.
+
+\section*{Goal of Stage 1}
+
+Milestone~1 is complete when:
+\begin{enumerate}
+  \item the single-GPU beamformer, the workload generator, and the reference implementations exist;
+  \item the beamformer passes the correctness tests (spec, Numerical Correctness) within documented tolerances;
+  \item its performance has been measured against the references.
+\end{enumerate}
+
+For each of the $F$ independent frequency channels $f$, the computation is
+\[
+  Y_f = W_f X_f, \qquad
+  W_f \in \mathbb{C}^{B \times S}\ \text{(weights)}, \quad
+  X_f \in \mathbb{C}^{S \times T}\ \text{(samples)}, \quad
+  Y_f \in \mathbb{C}^{B \times T}\ \text{(beams)}.
+\]
+This is a \textbf{batched complex GEMM} with batch count $F$. The work is $8BSTF$ FLOPs and the arithmetic intensity is $8BST / \big(e\,(ST + BS + BT)\big)$, where $e$ is the number of bytes per complex value.
+
+\section*{Components}
+
+\begin{tabularx}{\linewidth}{@{}l l X@{}}
+  \toprule
+  \textbf{Component} & \textbf{Purpose} & \textbf{Notes} \\
+  \midrule
+  FP32 reference (cuBLAS) & Correctness and performance & Complex strided batch in true FP32 (\texttt{CUBLAS\_COMPUTE\_32F}, \texttt{NVIDIA\_TF32\_OVERRIDE=0}). One library call in the test harness; no kernel to write. FP32 error ($\sim 10^{-7}$) is far below every BATS precision. \\
+  cuBLAS TF32 & Performance comparison & Same call with \texttt{CUBLAS\_COMPUTE\_32F\_FAST\_TF32}, like for like with the BATS TF32 kernel. BATS itself never calls cuBLAS. \\
+  Tensor-Core Beamformer & Existing tensor-core reference & Oostrum et al., IPDPS 2025. \\
+  BATS kernel (CUTLASS 3.x) & What we are building & TF32 real GEMM on Hopper \texttt{wgmma}, using the block formulation for complex arithmetic, as a strided batch over channels. \\
+  Workload generator & Shared synthetic inputs & Random data, plane-wave sources from known directions, edge cases. \\
+  Correctness tests & Compare against reference & Relative Frobenius error plus maximum elementwise error. \\
+  Benchmark harness & Repeatable timing & Records dimensions, hardware, software versions, and timings. \\
+  \bottomrule
+\end{tabularx}
+
+\section*{Decisions So Far}
+
+\begin{itemize}
+  \item \textbf{Language and build:} CUDA/C++, C++23, CMake. clangd is configured in \texttt{.clangd}, formatting follows LLVM style (\texttt{.clang-format}), and \texttt{.clang-tidy} enables the bugprone, modernize, performance, and readability checks.
+  \item \textbf{Hardware:} NVIDIA Hopper (\texttt{sm\_90a}: H100, H200) and Blackwell (\texttt{sm\_100a}: B200, GB200). Both need architecture-specific (\texttt{a}) builds to use their tensor-core instructions.
+  \item \textbf{Hopper only to start.} Stage~1 targets Hopper only. Blackwell is added later as a second implementation; an \texttt{sm\_90a} binary does not run on Blackwell, so it is a new kernel, not a recompile.
+  \item \textbf{CUTLASS 3.x only.} CUTLASS v4.8.1, using only its C++ 3.x API (CuTe, collective builders, \path{cutlass::gemm::kernel::GemmUniversal} with \path{GemmUniversalAdapter}). No CUTLASS 2.x classes, no hand-written PTX, and no cuBLAS inside BATS. The spec still says ``CUTLASS or direct tensor-core instructions'' (\texttt{approach.tex}); update it.
+  \item \textbf{FP32 baseline, TF32 first kernel.} The baseline (correctness reference and speed reference) is FP32, computed by cuBLAS. The first BATS kernel uses plain TF32 (FP32 storage, inputs rounded to TF32, FP32 accumulation) on Hopper \texttt{wgmma}. No FP32 or 3$\times$TF32 emulation. TF32 rounds each input to about $5 \times 10^{-4}$ relative error (FP32: $6 \times 10^{-8}$); a rough estimate (assuming rounding errors are random and partly cancel) puts output error around $10^{-4}$ relative, roughly 10$\times$ below 8-bit and 100$\times$ below 4-bit sensor quantization. Related work supports this: the Tensor-Core Beamformer uses 16-bit and 1-bit precision, and the Tensor-Core Correlator shows low precision is sufficient for closely related radio-astronomy computations; FP16 has the same 10-bit mantissa as TF32. TF32 is therefore \emph{expected} to be accurate enough, but this is not yet verified: the FP32 reference must measure the actual error, and ``enough'' depends on application requirements (dynamic range, sidelobe level) that still have to be set. After TF32 works, try lower precisions through the same alias and kernel: FP16 and BF16, then FP8, all on Hopper. FP4 (and FP6) need Blackwell and wait until it is added. FP64 is not used anywhere: the FP32 cuBLAS reference is accurate enough for every precision tested.
+  \item \textbf{Complex arithmetic by the block formulation.} CUTLASS 3.x has no complex kernel for Hopper, so each channel's complex product is computed as one real GEMM:
+  \[
+    \begin{bmatrix} Y_r \\ Y_i \end{bmatrix}
+    =
+    \begin{bmatrix} W_r & -W_i \\ W_i & W_r \end{bmatrix}
+    \begin{bmatrix} X_r \\ X_i \end{bmatrix},
+    \qquad
+    (2B \times T) = (2B \times 2S)(2S \times T).
+  \]
+  If each channel stores its real plane followed by its imaginary plane, $[X_r; X_i]$ is already one $2S \times T$ matrix and $[Y_r; Y_i]$ comes out planar, so inputs and outputs need no conversion. Only the $2B \times 2S$ block weight matrix is built, once, and reused across sample blocks (counted as planning cost). The work equals the 4M method.
+  \item \textbf{No transpose.} The kernel computes $Y_f = W_f X_f$ as written, with $M = 2B$, $N = T$, $K = 2S$ in the block formulation. The transposed form $Y^{\mathsf T} = X^{\mathsf T} W^{\mathsf T}$ is not used. Known cost: the MMA's $M$ dimension is at least 64, so with fewer than 32 beams ($2B < 64$) tiles are partly empty (Workload~A).
+  \item \textbf{Precision through a type alias.} The working precision is chosen in one place with a type alias (\texttt{using Real = float;} for TF32) so precisions can be switched and compared quickly. The alias selects a \textbf{precision traits} struct that bundles the storage type, MMA input type, accumulator type, and kernel configuration. The reference, generator, and tests are written generically over the alias; only the kernel choice is precision specific. Later precisions (FP16, BF16, FP8) reuse the same block-formulation kernel with different element types.
+  \item \textbf{Strided batching through zero-cost views.} The $F$ channels are stored back to back, so channel $f$ starts at \texttt{base + f $\times$ stride}. CUTLASS 3.x takes the batch as the $L$ mode of the problem shape $(M, N, K, L)$ with a stride for each operand, so one launch covers all channels. All code indexes the data through \texttt{cuda::std::mdspan} views (CCCL, usable on host and device), e.g.\ \texttt{x(f, i, t)}, which compile to the same pointer arithmetic as hand-written indexing. CUTLASS strides come straight from the views.
+  \item \textbf{Architecture behind an interface.} The beamformer is called through an architecture-independent interface, with the kernel chosen from the device's compute capability at run time. Adding Blackwell then means adding a second implementation, and the distributed planner can later treat each GPU's architecture as part of the topology it reads.
+  \item \textbf{Input layout: $[f][t][s]$, split per sample.} Within each channel, every time sample stores the real parts of all $S$ sensors followed by their imaginary parts. This is exactly $[X_r; X_i]$ as a $2S \times T$ column-major matrix with the sensor ($K$) dimension contiguous, so TF32 \texttt{wgmma} reads it with no transpose or copy. Station data usually arrives time-ordered per sensor, so ingest needs one reorder, counted as a layout cost. cuBLAS needs interleaved complex, so the test harness converts for the reference (a test-only cost).
+  \item \textbf{Input data:} weights and samples are supplied. Channelization, calibration, and weight generation are out of scope.
+  \item \textbf{CUTLASS as a git submodule,} pinned to tag \texttt{v4.8.1}.
+  \item \textbf{Catch2} for correctness tests, integrated with CTest.
+  \item \textbf{Layout costs count:} any packing, transposition, padding, or copies a method needs are included in its timing (spec, Evaluation).
+\end{itemize}
+
+\section*{Hopper Versus Blackwell Kernels}
+
+Both architectures load tiles with TMA, synchronize with \texttt{mbarrier}, group CTAs into clusters, and use warp-specialized persistent kernels. The tensor-core instruction and where its accumulator lives are different, so each needs its own CUTLASS kernel instantiation.
+
+\begin{tabularx}{\linewidth}{@{}l X X@{}}
+  \toprule
+  & \textbf{Hopper (\texttt{sm\_90a})} & \textbf{Blackwell (\texttt{sm\_100a})} \\
+  \midrule
+  MMA instruction & \texttt{wgmma}, issued by a warpgroup (4 warps) & \texttt{tcgen05.mma}, issued by a single thread \\
+  Operands & A from registers or shared memory; B from shared memory & A and B from shared memory; A may also come from tensor memory \\
+  Accumulator & Registers of the issuing warpgroup & Tensor memory (TMEM), a dedicated 256\,KB per-SM store, read out with \texttt{tcgen05.ld} \\
+  Tile shape & $M = 64$ per warpgroup; $N$ from 8 to 256 in steps of 8 & $M = 64$ or 128 on one SM, 128 or 256 across a 2-SM CTA pair; $N$ up to 256 \\
+  Multi-SM MMA & No; clusters share loads through TMA multicast only & Yes; one MMA can span two SMs (\texttt{cta\_group::2}) \\
+  Epilogue & Uses the same registers as the accumulator, so it competes with the main loop & Accumulator stays in TMEM, so the next tile's MMA can overlap the current tile's epilogue \\
+  Scheduling & Persistent kernels with a static tile scheduler & Adds cluster launch control for dynamic tile scheduling \\
+  Precisions (\texttt{wgmma}/\texttt{tcgen05}) & FP16, BF16, TF32, FP8, INT8; \textbf{no FP64} & Adds FP6, FP4, and block-scaled MXFP8/6/4 and NVFP4 \\
+  CUTLASS & Arch tag \texttt{Sm90}; ping-pong and cooperative warp-specialized schedules & Arch tag \texttt{Sm100}; 1-SM and 2-SM schedules \\
+  \bottomrule
+\end{tabularx}
+
+\textbf{Consequences for BATS} (to verify during research):
+\begin{itemize}
+  \item \textbf{Small $B$.} The MMA's $M$ dimension has a minimum of 64. Since we do not transpose, $M = 2B$, so fewer than 32 beams leaves tiles partly empty. Measure how much this costs Workload~A.
+  \item \textbf{Shared code.} Data layout, workload generation, tests, and benchmarking are architecture independent. Only the kernel instantiations (mainloop and epilogue schedules, tile and cluster shapes) differ.
+\end{itemize}
+
+\section*{CUTLASS Pinning and Hopper Support}
+
+Researched against the CUTLASS repository on 14 November 2026.
+
+\begin{itemize}
+  \item \textbf{Release:} pin tag \texttt{v4.8.1} (15 October 2026), the newest release. Its C++ code generation is tuned for CUDA~13.4. CUTLASS itself needs C++17; \texttt{sm\_90a} needs CUDA~12.0 or later, and adding Blackwell later needs 12.8 or later. Use CUDA~13.4 unless the cluster has something older, and record the exact toolkit and driver versions with every benchmark.
+  \item \textbf{Known issues in 4.8.1:} a toolkit code-generation bug affects some packed FP8 and mixed-input instructions, mainly on Rubin (\texttt{sm\_107a}). The TF32 path should not be affected; recheck before trying FP8.
+  \item \textbf{Header-only:} add \texttt{include/} (and \texttt{tools/util/include/} for helpers) to the include path. No CUTLASS build step is needed. Building CUTLASS's own tests and examples needs \texttt{-DCUTLASS\_NVCC\_ARCHS=90a}.
+  \item \textbf{TF32 on Hopper:} CuTe provides TF32 \texttt{wgmma} atoms (e.g.\ \texttt{MMA\_64x256x8\_F32TF32TF32\_SS\_TN}). The SM90 collective builder maps \texttt{float} inputs to TF32 MMA automatically.
+  \item \textbf{Layouts:} the TF32 \texttt{wgmma} instruction is natively ``TN'' (both operands K-major, i.e.\ the reduction dimension $S$ contiguous). The SM90 builder accepts other layouts by swapping A and B or by transposing B in shared memory (\path{is_swapAB}, \path{is_warpspecialized_transpose_B} in \path{sm90_gmma_builder.inl}), so any layout works, but K-major is expected to be fastest.
+  \item \textbf{FP64 on Hopper:} CuTe has FP64 and complex-FP64 \texttt{mma.sync} atoms (\path{SM90_16x8x4_C64C64C64C64_TN} and 16x8x8 / 16x8x16 variants), but no FP64 \texttt{wgmma} and no tested 3.x Hopper FP64 GEMM. Not used.
+  \item \textbf{Complex on Hopper:} no 3.x complex kernel for any reduced precision; hence the block formulation. (Blackwell does have a native 3.x planar complex GEMM, \path{sm100_mma_array_warpspecialized_planar_complex}, for FP16/BF16; consider it when Blackwell is added.)
+\end{itemize}
+
+\textbf{Starting points:}
+\begin{itemize}
+  \item CUTLASS's Hopper GEMM examples (\path{examples/48_hopper_warp_specialized_gemm} and nearby) and the SM90 TF32 device tests (\path{test/unit/gemm/device/sm90_gemm_tf32_*}) for a 3.x \texttt{CollectiveBuilder} with arch tag \texttt{Sm90} and \texttt{float} inputs.
+  \item The CuTe tutorials under \path{examples/cute/tutorial} for building layouts and tensors.
+\end{itemize}
+
+\section*{Open Research Questions}
+
+\subsection*{CUTLASS}
+\begin{todo}
+  \item \textbf{Cluster toolkit.} Which CUDA toolkit and driver the cluster has; whether CUDA~13.4 is available.
+  \item \textbf{Batched problem shape.} Set up the $(M, N, K, L)$ problem shape with $L = F$ and per-operand strides (\texttt{cute::Stride<\ldots, int64\_t>}) from the \texttt{mdspan} views. Confirm that the batch stride may be any value, including the padded per-channel size.
+  \item \textbf{Operand layout.} With $Y = W X$, the block weight matrix stored row-major and the $[f][t][s]$ samples are both K-major. Confirm the builder selects the native TN path with no swap or shared-memory transpose.
+  \item \textbf{Block weight matrix.} Where to build $\left[\begin{smallmatrix} W_r & -W_i \\ W_i & W_r \end{smallmatrix}\right]$ (host or a small GPU kernel), its memory cost ($4BS$ real values per channel, twice the complex weights), and how to count its cost as planning.
+  \item \textbf{Kernel schedule.} Compare ping-pong and cooperative warp-specialized schedules, and the persistent tile scheduler, for Workload~A and Workload~B shapes.
+  \item \textbf{Tile-shape selection.} Which tile and cluster shapes to instantiate, and how to handle small $B$ or $S$ without wasting partly empty tiles.
+  \item \textbf{Dimensions that are not tile multiples.} How CUTLASS 3.x handles them: predication through TMA bounds, and alignment requirements (TMA needs 16-byte-aligned strides, i.e.\ multiples of 4 \texttt{float}s).
+  \item \textbf{Integration.} Add CUTLASS as a git submodule at \texttt{third\_party/cutlass}; keep CUTLASS kernels in separate \texttt{.cu} files to limit rebuild times; set \texttt{CMAKE\_CUDA\_ARCHITECTURES} to \texttt{90a} (add \texttt{100a} with Blackwell support); check that clangd parses CUTLASS headers with the current \texttt{.clangd} flags.
+  \item \textbf{C++23 with nvcc.} Confirm that nvcc, CUTLASS, and \texttt{cuda::std::mdspan} build cleanly with \texttt{-std=c++23}; fall back to C++20 for \texttt{.cu} files if needed.
+\end{todo}
+
+\subsection*{Precision}
+\begin{todo}
+  \item Design the precision traits: storage type, MMA input type, accumulator type, kernel configuration, and error tolerance, selected at compile time by the alias.
+  \item Measure TF32 error against the FP32 reference for realistic input ranges, and check whether CUTLASS rounds or truncates FP32 to TF32 (truncation roughly doubles the error).
+  \item Whether the 3M (Gauss) variant, built from three real GEMMs, is accurate enough to be worth its saving.
+  \item Lower precisions on Hopper, in order: FP16 and BF16 (about 2$\times$ TF32 throughput), then FP8 E4M3/E5M2 (about 4$\times$). All accumulate in FP32. FP8 has only 2--3 mantissa bits, enough for 4-bit samples but coarse for weights; measure its effect on beam gain and sidelobes, and consider keeping weights at higher precision if CUTLASS's mixed-input kernels allow it.
+  \item FP4 and FP6 (block-scaled MXFP8/6/4, NVFP4) are Blackwell only. Try them when Blackwell is added.
+  \item Error tolerance for each precision, justified against typical sensor-data bit widths (often 4 to 8 bits per component).
+\end{todo}
+
+\subsection*{Baselines}
+\begin{todo}
+  \item \textbf{cuBLAS.} \texttt{cublasGemmStridedBatchedEx} on complex FP32 data: with \texttt{CUBLAS\_COMPUTE\_32F} as the correctness reference, and with \texttt{CUBLAS\_COMPUTE\_32F\_FAST\_TF32} as the like-for-like speed comparison. Verify the reference really runs in FP32 (math mode, \texttt{NVIDIA\_TF32\_OVERRIDE=0}). cuBLAS takes \textbf{interleaved} complex data, so the harness converts from the BATS layout; report that conversion separately.
+  \item \textbf{Tensor-Core Beamformer.} How to build it, which input layouts and precisions it supports, and what conversion our generated data needs.
+\end{todo}
+
+\subsection*{Correctness Testing}
+\begin{todo}
+  \item Metrics: relative error $\lVert Y - Y_{\mathrm{ref}} \rVert_F / \lVert Y_{\mathrm{ref}} \rVert_F$ and maximum elementwise error.
+  \item Check NaN, infinity, and integer overflow separately.
+  \item Test cases:
+  \begin{itemize}
+    \item random data;
+    \item plane-wave sources from known directions, where the steered beam should recover the source with the expected gain;
+    \item dimensions that are not multiples of the tile sizes;
+    \item $B = 1$ and $S = 1$.
+  \end{itemize}
+  \item Catch2 with \texttt{catch\_discover\_tests}; tests over dimensions and precisions via \texttt{GENERATE} and \texttt{TEMPLATE\_TEST\_CASE}.
+\end{todo}
+
+\subsection*{Benchmarking}
+\begin{todo}
+  \item Time with CUDA events, after warm-up runs, over repeated trials; report a stated statistic and a measure of variability.
+  \item Report kernel-only time and end-to-end time across the stated input and output boundaries separately.
+  \item Report throughput as beam samples per second and as achieved FLOP/s relative to the hardware TF32 peak.
+  \item Use Nsight Compute to check tensor-core utilization and achieved memory bandwidth.
+  \item Decide the stage~1 parameter sweep: ranges for $B$, $S$, $T$, and $F$ covering both Workload~A (few beams, memory bound) and Workload~B (many beams, compute bound).
+\end{todo}
+
+\subsection*{Workload Generator and Data Format}
+\begin{todo}
+  \item Define padding and alignment for the $[f][t][s]$ split-per-sample layout (TMA needs 16-byte-aligned strides, so $2S$ should be a multiple of 4).
+  \item Define the \texttt{mdspan} view types (extents, \texttt{layout\_right} / \texttt{layout\_left} / \texttt{layout\_stride}) and use them in the generator, the reference, and all implementations.
+  \item Plane-wave generator: array geometry, source directions, and steering weights $w_{f,b,i} = a_{b,i}\, e^{\,j 2\pi f \tau_{b,i}}$.
+  \item Generate on the host or the GPU? Use seeded randomness so runs are reproducible.
+\end{todo}
+
+\section*{Suggested Order}
+\begin{enumerate}
+  \item CMake project skeleton with CUDA, Catch2, and CUTLASS v4.8.1 (git submodule) building for \texttt{sm\_90a}, and a CUTLASS 3.x Hopper TF32 GEMM example running on our GPU.
+  \item Precision type alias and traits, \texttt{mdspan} view types for the strided batch, and workload generator.
+  \item FP32 cuBLAS reference (with layout conversion) and Catch2 correctness harness.
+  \item Block weight-matrix construction.
+  \item TF32 block-formulation kernel: CUTLASS 3.x real GEMM, batched over channels through the $L$ mode, fed from the views and passing the correctness tests.
+  \item cuBLAS TF32 speed comparison.
+  \item Benchmark harness and a first sweep.
+  \item FP16 and BF16, then FP8, through the same alias and kernel, each checked against the FP32 reference.
+  \item Tensor-Core Beamformer comparison.
+  \item Tile-shape, schedule, and precision tuning.
+  \item Blackwell (\texttt{sm\_100a}) kernel behind the same interface, passing the same tests.
+\end{enumerate}
+
+\section*{Starting References}
+\begin{itemize}
+  \item CUTLASS repository, documentation, and examples: \url{https://github.com/NVIDIA/cutlass}
+  \item PTX ISA (\texttt{wgmma}, \texttt{tcgen05}): \url{https://docs.nvidia.com/cuda/parallel-thread-execution/}
+  \item \texttt{cuda::std::mdspan} (CCCL): \url{https://nvidia.github.io/cccl/}
+  \item cuBLAS documentation: \url{https://docs.nvidia.com/cuda/cublas/}
+  \item Tensor-Core Beamformer: Oostrum et al., IPDPS 2025 (\texttt{oostrum2025tcbf} in \texttt{references.bib})
+  \item Error bounds for the 3M method: Higham, 1992 (\texttt{higham1992complex} in \texttt{references.bib})
+\end{itemize}
+
+\end{document}

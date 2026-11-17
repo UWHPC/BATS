@@ -25,7 +25,7 @@ Throughout this document, the following notation is used for the dimensions of a
 
 A sensor array is a collection of $S$ sensors placed at known positions. Depending on the application, the sensors may be radio antennas, microphones, ultrasound transducers, or hydrophones. Each sensor records a stream of samples representing the signal it receives over time.
 
-Beamforming combines the sensor signals so that the array responds strongly to a chosen direction and weakly to others~\cite{vanVeen1988beamforming}. The resulting combined signal is called a \emph{beam}.
+The combined output that the array produces for one chosen direction (\cref{sec:motivation}) is called a \emph{beam}.
 
 \subsubsection{Plane Waves and Direction of Arrival}
 \label{sec:plane-waves-and-direction-of-arrival}
@@ -108,7 +108,7 @@ The time-shift property of the Fourier transform states that
 
 When a channel is narrow enough that the delay $\tau$ is small relative to the inverse of the channel bandwidth, the delay can be approximated within that channel by a single phase rotation evaluated at the channel's centre frequency. This narrowband approximation turns the delay of each sensor into one complex multiplication per sample.
 
-The backend will receive already-channelized complex samples (\cref{sec:scope-non-goals}), indexed by channel, sensor, and time, stored as contiguous per-channel matrices with real and imaginary parts kept separately. How data-layout costs are counted in comparisons is defined in \cref{sec:evaluation}.
+The backend will receive already-channelized complex samples (\cref{sec:scope-non-goals}), indexed by channel, time, and sensor, stored as contiguous per-channel matrices. Within each channel, every time sample holds the real parts of all sensors followed by their imaginary parts, so the stacked real and imaginary inputs of \cref{eq:complex-block} form a single matrix with the sensor dimension contiguous. How data-layout costs are counted in comparisons is defined in \cref{sec:evaluation}.
 
 \subsubsection{Complex Steering Weights}
 \label{sec:complex-steering-weights}
@@ -200,9 +200,7 @@ Row $b$ of $W_f$ holds the weights of beam $b$, column $t$ of $X_f$ holds the sa
   \label{fig:per-channel-gemm}
 \end{figure}
 
-Some applications do not need the complex beam samples themselves and instead accumulate beam power, $\sum_t |y_{f,b}[t]|^2$, over an integration period. Such post-processing reduces the output volume significantly. The initial backend will produce complex beam samples; support for power integration may be considered later.
-
-% TODO: decide whether power integration is in scope for the first version.
+Some applications do not need the complex beam samples themselves and instead accumulate beam power, $\sum_t |y_{f,b}[t]|^2$, over an integration period. Such post-processing reduces the output volume significantly. The backend will produce complex beam samples; power integration is outside the scope (\cref{sec:scope-non-goals}).
 
 \subsubsection{Batched Complex GEMM}
 \label{sec:batched-complex-gemm}
@@ -318,7 +316,32 @@ In the ideal roofline model, workloads whose intensity is below the ratio of pea
 
 Other factors also limit performance. Small per-channel matrices may not provide enough parallel work to occupy the GPU, and launching many small kernels adds overhead. Matrix dimensions that are not multiples of the tensor-core tile sizes require padding or special handling at the boundaries, which wastes computation when $B$ or $S$ is small. If data originates in host memory, transfers over PCIe may dominate.
 
-% TODO: add a roofline figure for the target GPU with Workloads A and B marked.
+\Cref{fig:roofline} illustrates this for an H100 SXM with FP16 tensor-core inputs, which offers 989~TFLOP/s of dense throughput and 3.35~TB/s of memory bandwidth~\cite{h100Datasheet}, placing the ridge point at about 295~FLOP/byte. With $e = 4$ bytes per complex value, $S = 256$, and $T = 1024$, an example Workload~A with $B = 8$ has an intensity of about 15~FLOP/byte and is limited by memory bandwidth to about 5\% of peak, while an example Workload~B with $B = 1024$ reaches about 340~FLOP/byte, just past the ridge point.
+
+\begin{figure}[H]
+  \centering
+  \begin{tikzpicture}
+    \begin{loglogaxis}[
+      width=0.8\linewidth, height=6.2cm,
+      xmin=1, xmax=10000, ymin=1, ymax=3000,
+      xlabel={Arithmetic intensity $I$ (FLOP/byte)},
+      ylabel={Attainable TFLOP/s},
+      grid=major, grid style={gray!20},
+      tick label style={font=\small}, label style={font=\small},
+    ]
+      \addplot[thick,domain=1:295.2,samples=2] {3.35*x};
+      \addplot[thick,domain=295.2:10000,samples=2] {989};
+      \addplot[dashed,gray] coordinates {(295.2,1) (295.2,989)};
+      \node[font=\small,anchor=south,rotate=34] at (axis cs:12,48) {3.35 TB/s};
+      \node[font=\small,anchor=south] at (axis cs:2500,989) {989 TFLOP/s};
+      \addplot[only marks,mark=*,mark size=2.5pt] coordinates {(15.4,51.6) (341,989)};
+      \node[font=\small,anchor=north west] at (axis cs:15.4,51.6) {Workload A};
+      \node[font=\small,anchor=north west] at (axis cs:341,989) {Workload B};
+    \end{loglogaxis}
+  \end{tikzpicture}
+  \caption{Roofline for an H100 SXM with FP16 tensor-core inputs, with the example workloads from the text. The dashed line marks the ridge point.}
+  \label{fig:roofline}
+\end{figure}
 
 % ---------------------------------------------------------------------------
 \subsection{Multi-GPU and Multi-Node Execution}
@@ -335,8 +358,7 @@ Nodes are connected by a network such as InfiniBand or Ethernet. Network bandwid
 
 This hierarchy means that the same partitioning strategy can perform very differently depending on whether communication stays within a node or crosses the network.
 
-% TODO: describe the specific cluster hardware available to the team
-% (GPU models, NVLink topology, network type and bandwidth).
+Development and evaluation will use GPU clusters with NVIDIA H100 and H200 (Hopper) GPUs. Both support FP16, BF16, and FP8 tensor-core inputs. GPUs per node, NVLink connectivity, and the inter-node network differ between clusters, so the backend will identify the configuration at runtime (\cref{sec:hardware-topology-discovery}).
 
 \subsubsection{Communication Primitives}
 \label{sec:communication-primitives}
@@ -357,10 +379,27 @@ The batched GEMM can be divided among $P$ GPUs along any of its four dimensions.
   \item \textbf{By time.} Each GPU processes a contiguous range of samples. Weights must be replicated, and, like channel partitioning, each GPU needs all sensors for its time range.
 \end{itemize}
 
-These strategies can also be combined, for example partitioning by channel across nodes and by beam within a node. Which choice is cheapest depends on the workload dimensions and data placement, as stated in the core hypothesis (\cref{sec:core-hypothesis}).
+These strategies can also be combined, for example partitioning by channel across nodes and by beam within a node.
 
-% TODO: add a table giving communication volume per strategy as a function of
-% B, S, T, F, and P, under a stated assumption about initial data placement.
+\Cref{tab:communication-volume} gives the volume each GPU must send under each strategy. It assumes that each GPU starts with $S/P$ sensors for all channels and samples, that weights are placed in advance (\cref{sec:complex-steering-weights}), that outputs may remain distributed across GPUs, and that collectives use bandwidth-optimal algorithms.
+
+\begin{table}[H]
+  \centering
+  \begin{tabular}{@{}lll@{}}
+    \toprule
+    Strategy & Communication & Values sent per GPU \\
+    \midrule
+    By channel & all-to-all of input & $STF\,(P-1)/P^2$ \\
+    By beam    & all-gather of input & $STF\,(P-1)/P$ \\
+    By sensor  & reduce-scatter of partial outputs & $BTF\,(P-1)/P$ \\
+    By time    & all-to-all of input & $STF\,(P-1)/P^2$ \\
+    \bottomrule
+  \end{tabular}
+  \caption{Complex values sent per GPU for each partitioning strategy.}
+  \label{tab:communication-volume}
+\end{table}
+
+Comparing the channel and sensor rows, sensor partitioning sends less data when $B < S/P$, the condition stated in the core hypothesis (\cref{sec:core-hypothesis}). Volume is not the only cost: per-message latency, link bandwidth, and the topology between participants (\cref{sec:interconnects}) also affect which strategy is fastest.
 
 \subsubsection{Communication--Computation Overlap}
 \label{sec:communication-computation-overlap}

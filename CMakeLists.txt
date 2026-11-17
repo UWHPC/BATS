@@ -1,0 +1,32 @@
+cmake_minimum_required(VERSION 3.25)
+
+option(BATS_BUILD_TESTS "Build the BATS tests" ON)
+
+find_program(BATS_GXX15 NAMES g++-15 REQUIRED)
+if(NOT DEFINED CMAKE_CXX_COMPILER)
+  set(CMAKE_CXX_COMPILER "${BATS_GXX15}" CACHE FILEPATH "C++ compiler")
+endif()
+if(NOT DEFINED CMAKE_CUDA_HOST_COMPILER)
+  set(CMAKE_CUDA_HOST_COMPILER "${BATS_GXX15}" CACHE FILEPATH "CUDA host compiler")
+endif()
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+  set(CMAKE_CUDA_ARCHITECTURES 90a)
+endif()
+
+project(BATS LANGUAGES CXX CUDA)
+
+if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 13.4)
+  message(FATAL_ERROR "BATS requires CUDA 13.4 or later (found ${CMAKE_CUDA_COMPILER_VERSION})")
+endif()
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_STANDARD 23)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+
+add_executable(bats src/main.cpp)
+
+if(BATS_BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
+endif()
