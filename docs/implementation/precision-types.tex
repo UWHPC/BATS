@@ -1,0 +1,307 @@
+\documentclass[10pt,letterpaper]{article}
+\usepackage[letterpaper,margin=0.75in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{parskip}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage[hidelinks]{hyperref}
+\usepackage{xurl}
+\setlist{nosep,leftmargin=1.4em}
+\newlist{todo}{itemize}{2}
+\setlist[todo]{label=$\square$,nosep,leftmargin=1.6em}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{10pt}{3pt}
+\titlespacing*{\subsection}{0pt}{8pt}{2pt}
+\titleformat*{\section}{\large\bfseries}
+\titleformat*{\subsection}{\normalsize\bfseries}
+\lstset{basicstyle=\ttfamily\footnotesize,columns=fullflexible,keepspaces=true,
+  frame=single,framerule=0.4pt,xleftmargin=4pt,xrightmargin=4pt,
+  language=C++,morekeywords={constexpr,using,static_assert}}
+\newcommand{\ur}{\mathbf{u}}
+
+\begin{document}
+
+{\LARGE\bfseries BATS: Reduced-Precision Types\par}
+\vspace{2pt}
+{\large Precision traits, CUTLASS/cuBLAS representation, and tolerances \hfill UWHPC \textperiodcentered{} Working draft, \today\par}
+\vspace{-4pt}
+\noindent\rule{\linewidth}{0.6pt}
+
+This note plans the precision layer of the stage~1 beamformer. It resolves the \emph{Precision} items in the stage~1 notes: the precision traits, the per-precision error tolerances, and how each type is spelled in CUTLASS and cuBLAS. It covers TF32, FP16, BF16, and FP8 (E4M3/E5M2) on Hopper (\texttt{sm\_90a}) for the block-formulation complex GEMM of spec~\S2.4.2, plus the FP32 reference. FP6/FP4 and block-scaled formats are Blackwell-only and out of scope.
+
+CUTLASS facts below were checked against tag \texttt{v4.8.1}; file paths are relative to the CUTLASS repository. Items marked \textbf{(verify)} are expected behaviour that still needs a test on our hardware.
+
+\section{What Stays Fixed Across Precisions}
+
+Precision is a compile-time choice that changes as little as possible:
+\begin{itemize}
+  \item \textbf{Problem:} per channel, $\left[\begin{smallmatrix} Y_r \\ Y_i \end{smallmatrix}\right] = \left[\begin{smallmatrix} W_r & -W_i \\ W_i & W_r \end{smallmatrix}\right] \left[\begin{smallmatrix} X_r \\ X_i \end{smallmatrix}\right]$ as one real GEMM with $M = 2B$, $N = T$, $K = 2S$, batched over $L = F$ channels.
+  \item \textbf{Layout:} $[f][t][s]$ split per sample (sensor/$K$ dimension contiguous), block weights row-major, so both operands are K-major (``TN''). This matters more below, because TF32 and FP8 \texttt{wgmma} \emph{only} accept K-major operands.
+  \item \textbf{Accumulator:} always FP32. FP16 accumulation (offered by \texttt{wgmma} for FP16 and FP8 inputs) is never used; the traits enforce this with a \texttt{static\_assert}.
+  \item \textbf{Output:} always FP32 (\texttt{ElementD = float}, no source operand: \texttt{ElementC = void}). This keeps every comparison against the reference in one type and avoids FP16 output overflow: $|Y| \le S \cdot \max|x| \cdot \max|w|$, which is $1024 \cdot 127 = 1.3 \times 10^5 > 65504$ for 8-bit samples and $S = 1024$. Reduced-precision output is a later option, and would need an epilogue scale.
+  \item \textbf{Interface, \texttt{mdspan} views, generator, and harness} are written once, generic over the precision tag.
+\end{itemize}
+Only the \emph{operand} type (storage and MMA input), its conversion and scaling, alignment, tile depth, mainloop schedule, cuBLAS counterpart, and tolerance change. Section~\ref{tab:config} at the end lists them.
+
+\section{The Formats}
+
+$\ur$ is the unit roundoff under round-to-nearest-even, $2^{-(m+1)}$ for $m$ explicit mantissa bits. ``Exact ints'' is the largest $n$ such that every integer in $[-n, n]$ is representable. This decides whether integer sensor samples can be stored losslessly. Peak rates are H100 SXM dense tensor-core datasheet figures, for scale only.
+
+\begin{center}
+\small
+\begin{tabular}{@{}l c c l l l r r@{}}
+  \toprule
+  \textbf{Format} & \textbf{E/M bits} & \textbf{Storage} & $\ur$ & \textbf{Max finite} & \textbf{Min normal} & \textbf{Exact ints} & \textbf{TFLOP/s} \\
+  \midrule
+  FP32       & 8/23 & 32 & $2^{-24} \approx 6.0\times10^{-8}$ & $3.4\times10^{38}$ & $1.2\times10^{-38}$ & $2^{24}$ & 67 (no TC) \\
+  TF32       & 8/10 & 32 (in \texttt{float}) & $2^{-11} \approx 4.9\times10^{-4}$ & $3.4\times10^{38}$ & $1.2\times10^{-38}$ & 2048 & 495 \\
+  FP16       & 5/10 & 16 & $2^{-11} \approx 4.9\times10^{-4}$ & 65504 & $6.1\times10^{-5}$ & 2048 & 990 \\
+  BF16       & 8/7  & 16 & $2^{-8} \approx 3.9\times10^{-3}$ & $3.4\times10^{38}$ & $1.2\times10^{-38}$ & 256 & 990 \\
+  FP8 E4M3   & 4/3  & 8  & $2^{-4} = 6.25\times10^{-2}$ & 448 (no $\infty$) & $2^{-6}$ & 16 & 1979 \\
+  FP8 E5M2   & 5/2  & 8  & $2^{-3} = 1.25\times10^{-1}$ & 57344 & $2^{-14}$ & 8 & 1979 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+Consequences for BATS:
+\begin{itemize}
+  \item 8-bit samples ($-128 \ldots 127$) are \textbf{exact} in TF32, FP16, and BF16, but not in FP8. 4-bit samples are exact in every format. For integer data, input error therefore comes from the weights alone, except under FP8 with 8-bit samples.
+  \item FP16 has the same precision as TF32 at half the bytes and twice the rate. Its narrow range is harmless here: inputs are bounded and accumulation and output are FP32. FP16 is therefore expected to dominate BF16 for this workload. BF16 is kept as a comparison point.
+  \item Use E4M3 for both operands. E5M2 trades a mantissa bit for range we do not need. Hopper supports mixed E4M3$\times$E5M2, but it is not planned.
+\end{itemize}
+
+\section{Representation in CUTLASS}
+
+All types are trivially-copyable structs over a raw integer (\texttt{storage}), with \texttt{bitcast()}, \texttt{raw()}, and \texttt{std::numeric\_limits} specializations. CuTe re-exports them as \texttt{cute::half\_t} and so on.
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}l l l X@{}}
+  \toprule
+  \textbf{Format} & \textbf{CUTLASS type} & \textbf{Header} & \textbf{Notes} \\
+  \midrule
+  FP32/TF32 & \texttt{float} $\to$ \texttt{cutlass::tfloat32\_t} & \path{cutlass/tfloat32.h} & There is no TF32 storage type in practice. The SM90 \texttt{CollectiveBuilder} rewrites \texttt{ElementA/B = float} to \texttt{ElementAMma = tfloat32\_t} (\path{sm90_gmma_builder.inl}, \texttt{conditional\_t<is\_same\_v<ElementA,float>, tfloat32\_t, \ldots>}). So on Hopper, ``FP32 inputs'' into a tensor-core GEMM \emph{always} means TF32: no true FP32 CUTLASS 3.x tensor-core path exists. \\
+  FP16 & \texttt{cutlass::half\_t} & \path{cutlass/half.h} & Wraps \texttt{uint16\_t}; converts to and from \texttt{\_\_half}. \\
+  BF16 & \texttt{cutlass::bfloat16\_t} & \path{cutlass/bfloat16.h} & Wraps \texttt{uint16\_t}; converts to and from \texttt{\_\_nv\_bfloat16}. \\
+  FP8 & \texttt{cutlass::float\_e4m3\_t}, \texttt{float\_e5m2\_t} & \path{cutlass/float8.h} & Wraps \texttt{uint8\_t}. Conversion from \texttt{float} saturates to $\pm$max finite (\texttt{cvt.rn.satfinite.e4m3x2.f32}), so out-of-range values clip silently instead of becoming $\infty$/NaN. \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection*{Conversion and rounding}
+Conversions use \texttt{cutlass::NumericConverter<To, From, FloatRoundStyle>} and the vectorized \texttt{NumericArrayConverter} (\path{cutlass/numeric_conversion.h}). Relevant styles are \texttt{round\_to\_nearest}, \texttt{round\_toward\_zero}, \texttt{round\_half\_ulp\_truncate} (add half an ulp, then truncate; ties away from zero), and \texttt{round\_to\_nearest\_satfinite}. The \texttt{tfloat32\_t(float)} constructor uses \texttt{round\_half\_ulp\_truncate}.
+
+\textbf{TF32 rounding is not automatic on Hopper (verify).} The SM90 mainloop copies FP32 bits unchanged from global memory to shared memory with TMA, and \texttt{wgmma.tf32} uses only the upper 19 bits of each operand. The effective conversion is therefore \emph{truncation}, with $\ur = 2^{-10}$: twice the round-to-nearest error. Options:
+\begin{enumerate}
+  \item Accept truncation, and set the tolerance from $\ur = 2^{-10}$.
+  \item Pre-round in a small conversion kernel (\texttt{NumericArrayConverter<tfloat32\_t, float, round\_to\_nearest>}, storing the result back as \texttt{float}). For weights, this is a once-per-plan cost. For samples, it is an extra pass that counts as layout cost.
+\end{enumerate}
+Recommendation: pre-round the weights (free at plan time) and measure whether pre-rounding samples is worth a pass. A one-element test separates the two behaviours: $x = 1 + 3 \cdot 2^{-12}$ rounds to $1 + 2^{-10}$ but truncates to $1$.
+
+FP16, BF16, and FP8 always need an explicit conversion from the FP32 data the generator and ingest produce. The conversion kernel (or fused ingest reorder) is precision-specific and its cost is counted, as for any layout cost.
+
+\subsection*{Kernel configuration that depends on the type}
+\begin{itemize}
+  \item \textbf{Operand major-ness.} TF32 and FP8 GMMA atoms \texttt{static\_assert(MajorA == GMMA::Major::K)} and the same for B (\path{cute/arch/mma_sm90.hpp}). FP16/BF16 also accept MN-major. Our TN layout satisfies all of them.
+  \item \textbf{Alignment.} TMA needs 16-byte-aligned strides: 4 elements for \texttt{float}, 8 for 16-bit types, 16 for FP8. With $K = 2S$, $S$ must be padded to a multiple of 2, 4, and 8 respectively, and the generator's padding must come from the traits. The output is always \texttt{float}, so $2B$ must be a multiple of 4.
+  \item \textbf{Tile depth.} The MMA $K$ depth is 8 for TF32, 16 for FP16/BF16, and 32 for FP8. A 128-byte swizzled K-slice gives \texttt{TileShape} $K$ = 32 / 64 / 128 respectively, so the shared-memory bytes per stage, and roughly the stage count, are unchanged.
+  \item \textbf{FP8 mainloop.} FP8 inputs select a separate mainloop (\texttt{MainloopSm90TmaGmmaWarpSpecializedFP8}). Hopper's FP8 \texttt{wgmma} accumulates internally with fewer than 32 bits (roughly 14 mantissa bits have been reported publicly; NVIDIA does not document it). The default FP8 mainloop therefore promotes partial sums into FP32 registers every \texttt{mma\_promotion\_interval} MMAs (default 4, i.e.\ every 128 $K$ elements; it must be a multiple of MMAs per k-tile). The \texttt{KernelTmaWarpSpecialized\{,Pingpong,Cooperative\}FP8FastAccum} schedules skip promotion: faster, but less accurate for large $K$. This is the only precision where the \emph{schedule} changes accuracy, so it is a traits field and appears in the tolerance.
+  \item \textbf{FP8 scaling.} Apply scale factors $s_W, s_X$ before conversion, and remove them in the epilogue with $\alpha = 1/(s_W s_X)$. The epilogue is either a plain \texttt{LinearCombination} with \texttt{alpha} or \texttt{fusion::ScaledLinCombPerRowBiasEltAct} (\texttt{scale\_a}, \texttt{scale\_b}). Choose \textbf{powers of two}, so scaling and unscaling are exact and add no error. Unit-modulus weights ($|w| \le 1$) have components that fall into E4M3 subnormals ($< 2^{-6}$) and lose precision. Scaling by $s_W = 2^8$ puts the largest component at 256 and keeps most components normal. Samples: 4-bit data needs no scale; 8-bit data is not exact in FP8 whatever the scale.
+\end{itemize}
+
+\section{Representation in cuBLAS}
+
+cuBLAS appears only in the test and benchmark harness, never in BATS itself. Types are \texttt{cudaDataType\_t} values; precision is selected by \texttt{cublasComputeType\_t}.
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}l l l l X@{}}
+  \toprule
+  \textbf{Role} & \textbf{A/B type} & \textbf{C/D type} & \textbf{Compute type} & \textbf{API and notes} \\
+  \midrule
+  FP32 reference & \texttt{CUDA\_C\_32F} & \texttt{CUDA\_C\_32F} & \texttt{CUBLAS\_COMPUTE\_32F\_PEDANTIC} & \texttt{cublasGemmStridedBatchedEx}, complex and interleaved. \texttt{PEDANTIC} forbids TF32 and any reduced-precision or emulated path. Also set \texttt{NVIDIA\_TF32\_OVERRIDE=0}. \\
+  TF32 & \texttt{CUDA\_R\_32F} & \texttt{CUDA\_R\_32F} & \texttt{CUBLAS\_COMPUTE\_32F\_FAST\_TF32} & \texttt{cublasGemmStridedBatchedEx}. Also available as complex (\texttt{CUDA\_C\_32F}). \\
+  FP16 & \texttt{CUDA\_R\_16F} & \texttt{CUDA\_R\_32F} & \texttt{CUBLAS\_COMPUTE\_32F} & \texttt{cublasGemmStridedBatchedEx}. FP32 compute with FP16 inputs gives FP32 accumulation. \\
+  BF16 & \texttt{CUDA\_R\_16BF} & \texttt{CUDA\_R\_32F} & \texttt{CUBLAS\_COMPUTE\_32F} & Same API as FP16. \\
+  FP8 & \texttt{CUDA\_R\_8F\_E4M3} & \texttt{CUDA\_R\_32F} & \texttt{CUBLAS\_COMPUTE\_32F} & \textbf{cuBLASLt only} (\texttt{cublasLtMatmul}). TN layout required. Scales via \texttt{CUBLASLT\_MATMUL\_DESC\_\{A,B\}\_SCALE\_POINTER}; \texttt{CUBLASLT\_MATMUL\_DESC\_FAST\_ACCUM} is the analogue of CUTLASS FastAccum; batch via \texttt{CUBLASLT\_MATRIX\_LAYOUT\_BATCH\_COUNT}/\texttt{STRIDED\_BATCH\_OFFSET}. No complex FP8. \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+
+Recommendation: run the reduced-precision \textbf{cuBLAS speed comparisons as real GEMMs on the same block matrices} that BATS uses. This is like for like (same $M,N,K$, same layout, same conversion cost), and cuBLAS has no complex path for FP8 (complex FP16/BF16 support is uneven: \textbf{verify}). The \textbf{correctness reference} stays a \emph{complex} FP32 GEMM on the original $W, X$. Because it does not use the block formulation, it also catches bugs in building the block matrix or in the planar layout.
+
+\section{The FP32 Reference Implementation}
+
+The reference is a stack of independent oracles, not a second BATS kernel:
+\begin{enumerate}
+  \item \textbf{cuBLAS FP32 (scalable oracle).} The complex strided-batched GEMM above, with \texttt{PEDANTIC}. It uses the interleaved layout, so the harness converts from the BATS planar layout (a test-only cost). Its error, $\approx \gamma_K \ur_{32}$ worst case and typically far less, is $10^3$--$10^6\times$ below every candidate format. It is \emph{functionally} ground truth.
+  \item \textbf{CPU \texttt{double} oracle (innermost).} A naive triple loop over complex values with \texttt{double} accumulation, for small shapes ($B, S, T \lesssim 64$, a few channels). It validates the cuBLAS call itself: argument order, conjugation, strides, and layout conversion. It also computes $|W|\,|X|$ for the componentwise bound in Section~\ref{sec:tol}.
+  \item \textbf{No FP32 BATS instantiation on Hopper.} The thread suggestion of an FP32 ``bisect'' instantiation of our own kernel does not carry over. The SM90 builder turns \texttt{float} into TF32, and there is no FP32 \texttt{wgmma}. A true-FP32 version of our kernel would need a SIMT collective, which is a different kernel and so not the same-tiling bisect tool. Instead, \textbf{bisect by precision}: run the same block-formulation kernel as FP16 and TF32, and compare against the dequantized-input reference (Section~\ref{sec:tol}, comparison~A), which removes input rounding from the comparison.
+  \item \textbf{Tripwires.} The harness asserts that the reference's math mode is \texttt{PEDANTIC}, and that the reference agrees with the CPU oracle to $\lesssim 10^{-6}$ relative on the small shapes. A TF32-sized disagreement means TF32 leaked into the reference.
+\end{enumerate}
+
+\section{Precision Traits}
+
+The stage~1 notes select precision with \texttt{using Real = float;}, but on Hopper \texttt{float} is ambiguous: it is the FP32 reference \emph{and} the TF32 kernel operand. Use \textbf{tag types} instead, and a traits struct per tag. The kernel, generator, and tests take a tag; the reference has its own tag and no kernel.
+
+\begin{lstlisting}
+namespace bats::precision {
+struct fp32_ref {}; struct tf32 {}; struct fp16 {}; struct bf16 {}; struct fp8_e4m3 {};
+
+template <class Tag> struct traits;
+
+template <> struct traits<tf32> {
+  using element    = float;                 // global-memory operand type
+  using mma        = cutlass::tfloat32_t;   // what the SM90 builder selects
+  using accumulator = float;
+  using output     = float;
+  static constexpr int  alignment = 16 / sizeof(element);       // 4
+  static constexpr int  tile_k    = 32;                         // 128 B per k-slice
+  using schedule   = cutlass::gemm::KernelTmaWarpSpecializedCooperative;
+  static constexpr auto round     = cutlass::FloatRoundStyle::round_to_nearest; // pre-round W
+  static constexpr bool truncated_samples = true;               // unless samples pre-rounded
+  static constexpr double unit_roundoff  = 0x1p-11;             // 0x1p-10 if truncated
+  static constexpr cudaDataType_t       cublas_type    = CUDA_R_32F;
+  static constexpr cublasComputeType_t  cublas_compute = CUBLAS_COMPUTE_32F_FAST_TF32;
+};
+
+template <> struct traits<fp8_e4m3> {
+  using element    = cutlass::float_e4m3_t;
+  using accumulator = float;
+  using output     = float;
+  static constexpr int    alignment = 16;
+  static constexpr int    tile_k    = 128;
+  using schedule   = cutlass::gemm::KernelTmaWarpSpecializedCooperative; // promoted accum
+  // alt: KernelTmaWarpSpecializedCooperativeFP8FastAccum
+  static constexpr int    promotion_interval = 4;
+  static constexpr float  scale_w = 0x1p8f, scale_x = 1.0f;   // powers of two only
+  static constexpr double unit_roundoff = 0x1p-4;
+  // cuBLAS comparison goes through cublasLtMatmul, not GemmEx
+};
+// fp16/bf16: element = cutlass::half_t / bfloat16_t, alignment 8, tile_k 64,
+// round-to-nearest conversion, cublas_type CUDA_R_16F / CUDA_R_16BF, CUBLAS_COMPUTE_32F.
+// fp32_ref: no CUTLASS kernel; CUDA_C_32F + CUBLAS_COMPUTE_32F_PEDANTIC.
+
+template <class Tag> concept KernelPrecision = requires {
+  requires std::is_same_v<typename traits<Tag>::accumulator, float>;
+};
+}
+\end{lstlisting}
+
+The traits also feed the generator (padding of $S$ and $B$ from \texttt{alignment}), the conversion kernel (\texttt{element}, \texttt{round}, scales), the epilogue (\texttt{alpha} from the scales), and the tests (\texttt{unit\_roundoff} and accumulation model). GoogleTest typed tests then run over \texttt{::testing::Types<tf32, fp16, bf16, fp8\_e4m3>}.
+
+\section{Tolerances}
+\label{sec:tol}
+
+A single ``epsilon per type'' cannot tell a functional bug from rounding noise, so the harness makes \textbf{two comparisons}, each with a tolerance derived from the format rather than tuned by hand.
+
+\subsection*{Comparison A: kernel correctness (dequantized-input reference)}
+Convert $W, X$ to the candidate format (with scaling) and back to FP32, giving $\hat W, \hat X$, and compute $\hat Y_{\mathrm{ref}} = \hat W \hat X$ with the FP32 reference. Input rounding is now \emph{identical} on both sides, so the remaining difference is accumulation error only, and the bound is format-independent and tight:
+\[
+  \lvert \hat Y - \hat Y_{\mathrm{ref}} \rvert \;\le\; \bigl(\gamma_{K}(\ur_{\mathrm{acc}}) + \gamma_{K}(\ur_{32})\bigr)\, \lvert \hat W \rvert\, \lvert \hat X \rvert
+  \quad\text{elementwise},\qquad \gamma_K(\ur) = \frac{K\ur}{1-K\ur},\ K = 2S.
+\]
+$\ur_{\mathrm{acc}} = 2^{-24}$ for every format, except FP8 FastAccum, whose internal accumulator precision has to be \textbf{measured} (the bound is then applied per promotion interval). This is the test that catches tiling, stride, conjugation, block-matrix, and epilogue bugs. A functional bug typically violates it by orders of magnitude. The bound is worst case; in practice errors are $\sim\sqrt{K}\,\ur$, so also report the observed/bound ratio to spot drift.
+
+\subsection*{Comparison B: precision cost (original-input reference)}
+Compare the kernel output with $Y_{\mathrm{ref}} = WX$ computed from the original FP32 inputs. This measures what the format costs the application:
+\begin{itemize}
+  \item \textbf{Hard bound} (holds whenever nothing over- or underflows):
+  $\lvert \hat Y - Y_{\mathrm{ref}} \rvert \le \bigl(\ur_W + \ur_X + \ur_W\ur_X + \gamma_K(\ur_{\mathrm{acc}}) + \gamma_K(\ur_{32})\bigr)\,\lvert W\rvert\,\lvert X\rvert$. Here $\ur_W, \ur_X$ are the format's unit roundoff for each operand: zero for data exactly representable in the format (e.g.\ 8-bit samples in FP16), and $2\ur$ when the conversion truncates. The bound is \emph{componentwise}, normalized by $|W|\,|X|$, so it stays meaningful in beam nulls where $|Y| \ll |W|\,|X|$ and a relative-elementwise check would fail spuriously.
+  \item \textbf{Expected (statistical) error.} With independent round-to-nearest errors (RMS $\approx \ur/\sqrt3$):
+  $\displaystyle \varepsilon_{\mathrm{rel}} = \frac{\lVert \hat Y - Y_{\mathrm{ref}} \rVert_F}{\lVert Y_{\mathrm{ref}} \rVert_F} \approx \kappa\,\sqrt{\tfrac{\ur_W^2 + \ur_X^2}{3}}$, with $\kappa = \dfrac{\lVert\, |W|\,|X| \,\rVert_F}{\lVert WX \rVert_F}$ computed by the harness ($\kappa \approx 1$ for random data; large for steered nulls). Pass if $\varepsilon_{\mathrm{rel}} \le 2\times$ predicted. Also check the lower side: $\varepsilon_{\mathrm{rel}} \ll$ predicted on non-representable random data means the kernel did not run in the format we think it did.
+  \item \textbf{Application acceptance} (not derivable from the format): beam gain error at the steered direction, peak sidelobe level, and null depth on the plane-wave workloads, compared against FP32. These thresholds come from the science requirements and are still to be set (open question below).
+\end{itemize}
+
+\begin{center}
+\small
+\begin{tabular}{@{}l l l l l@{}}
+  \toprule
+  \textbf{Precision} & $\ur_W$ & $\ur_X$ (float / 8-bit / 4-bit) & \textbf{Pred.\ $\varepsilon_{\mathrm{rel}}$ ($\kappa{=}1$, float data)} & \textbf{Comparison A $\ur_{\mathrm{acc}}$} \\
+  \midrule
+  FP32 ref   & --- & --- & $\lesssim 10^{-7}$ & $2^{-24}$ \\
+  TF32 (RN)  & $2^{-11}$ & $2^{-11}$ / 0 / 0 & $4.0\times10^{-4}$ & $2^{-24}$ \\
+  TF32 (trunc.) & $2^{-10}$ & $2^{-10}$ / 0 / 0 & $8.0\times10^{-4}$ & $2^{-24}$ \\
+  FP16       & $2^{-11}$ & $2^{-11}$ / 0 / 0 & $4.0\times10^{-4}$ & $2^{-24}$ \\
+  BF16       & $2^{-8}$  & $2^{-8}$ / 0 / 0 & $3.2\times10^{-3}$ & $2^{-24}$ \\
+  FP8 E4M3   & $2^{-4}$  & $2^{-4}$ / $2^{-4}$ / 0 & $5.1\times10^{-2}$ & $2^{-24}$ (promoted) / measure (FastAccum) \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\subsection*{Exactness tests (no tolerance)}
+These catch bugs that a percent-level FP8 tolerance would hide:
+\begin{itemize}
+  \item \textbf{Representable integers.} $W, X$ with real and imaginary parts in $[-8, 7]$ are exact in every format, including E4M3. Every partial sum stays below $2^{24}$ for $K < 2^{18}$, so FP32 accumulation is exact in any order. The kernel must then match the reference \textbf{bit for bit} in every precision. FastAccum FP8 is exact only while the sums fit its narrower accumulator, so use small $K$ there.
+  \item \textbf{Structured weights.} Identity, permutation, and $\mathrm{diag}(v)$ steering matrices: each output has one nonzero term, so it is exact regardless of accumulation order.
+  \item \textbf{Rounding-mode probe.} $x = 1 + 3\cdot2^{-12}$ through an identity weight distinguishes TF32 round-to-nearest from truncation, and confirms the FP8 \texttt{satfinite} behaviour at $\pm 449$.
+  \item \textbf{NaN/$\infty$/saturation.} Checked separately. Since E4M3 has no $\infty$ and conversion saturates, also compare the amplitude histogram of FP8 outputs with the reference: clipping shrinks the distribution even when the norm looks fine.
+\end{itemize}
+
+\section{Per-Type Notes}
+
+\begin{itemize}
+  \item \textbf{TF32} (first kernel). No extra storage or conversion pass. The open question is truncation versus rounding (above). Expected $\varepsilon_{\mathrm{rel}} \sim 4$--$8 \times 10^{-4}$.
+  \item \textbf{FP16.} Same precision as TF32, half the bytes, which matters for memory-bound Workload~A, and twice the peak rate. It needs a conversion pass, which can be fused into the ingest reorder. 8-bit samples are lossless. The main risk is overflow if the output type is ever FP16.
+  \item \textbf{BF16.} $8\times$ coarser than FP16 with no compensating benefit for bounded inputs. It is implemented because the cost is a traits specialization, and reported for comparison.
+  \item \textbf{FP8 E4M3.} The only format that loses information on 8-bit samples, and coarse for weights ($\approx 6\%$ per element, averaging down as $\sim 1/\sqrt{S}$ over a beam). Needs power-of-two scales, the FP8 mainloop, and a promotion-interval / FastAccum decision. The stage~1 notes record a v4.8.1 toolkit code-generation issue for some packed FP8 instructions (mainly \texttt{sm\_107a}): recheck on \texttt{sm\_90a} first. Keeping weights at higher precision would need a mixed-input kernel (\texttt{KernelTmaWarpSpecialized*MixedInput}). Those kernels target narrow-integer $\times$ 16-bit and convert the narrow operand up to the wide type, which would give a 16-bit MMA, not FP8 throughput. So this is not a free win; evaluate separately.
+\end{itemize}
+
+\subsection*{Interaction with the complex formulation (spec \S2.4.2)}
+\begin{itemize}
+  \item \textbf{Block formulation.} Negation is exact in every format, so the $-W_i$ block adds no error. The block matrix is built in FP32 and converted once, so both copies of $W_r$ and $W_i$ round identically. It doubles weight storage ($4BS$ elements per channel) in the operand format, which is $4\times$ smaller in FP8 than in TF32.
+  \item \textbf{3M (Gauss).} The sums $W_r + W_i$ and $X_r + X_i$ have up to twice the magnitude and are rounded a second time. Form them in FP32 and round once into the operand format. Even so, the subtraction $K_1 - K_2$ amplifies relative error when the two terms nearly cancel. For FP8 this pushes errors well past the per-element budget. Recommendation: evaluate 3M only for FP16/BF16/TF32, and never for FP8.
+\end{itemize}
+
+\section{Configuration Summary}
+\label{tab:config}
+
+\begin{center}
+\small
+\begin{tabularx}{\linewidth}{@{}l X X X X@{}}
+  \toprule
+  & \textbf{TF32} & \textbf{FP16} & \textbf{BF16} & \textbf{FP8 E4M3} \\
+  \midrule
+  \texttt{ElementA/B} & \texttt{float} (builder $\to$ \texttt{tfloat32\_t}) & \texttt{half\_t} & \texttt{bfloat16\_t} & \texttt{float\_e4m3\_t} \\
+  Accum / output & \texttt{float} / \texttt{float} & same & same & same \\
+  Conversion & none (truncate) or pre-round & RN, fused in ingest & RN & RN \texttt{satfinite} after scaling \\
+  Scale & none & none & none & $s_W = 2^8$, $s_X = 1$; $\alpha = 1/(s_W s_X)$ \\
+  Alignment (elements) & 4 & 8 & 8 & 16 \\
+  Pad $S$ to multiple of & 2 & 4 & 4 & 8 \\
+  \texttt{TileShape} $K$ & 32 & 64 & 64 & 128 \\
+  Operand majors & K/K required & K/K (MN allowed) & K/K (MN allowed) & K/K required \\
+  Mainloop / schedule & SM90 TMA WS & SM90 TMA WS & SM90 TMA WS & FP8 mainloop; promotion interval 4 or FastAccum \\
+  cuBLAS comparison & GemmEx, \texttt{FAST\_TF32} & GemmEx, \texttt{R\_16F} & GemmEx, \texttt{R\_16BF} & cuBLASLt, \texttt{8F\_E4M3} + scales \\
+  $\ur$ for tolerance & $2^{-11}$ ($2^{-10}$ trunc.) & $2^{-11}$ & $2^{-8}$ & $2^{-4}$ \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Open Questions}
+\begin{todo}
+  \item Confirm that SM90 TF32 \texttt{wgmma} truncates un-rounded FP32 operands (rounding-mode probe), and measure the pre-rounding cost for samples.
+  \item Measure the FP8 \texttt{wgmma} internal accumulator precision on H100 (sum of many small terms), and pick the promotion interval or FastAccum from the observed error at our $K$.
+  \item Set application acceptance thresholds (beam gain, sidelobe level, null depth) and decide which precisions are ``supported'' versus ``measured only''.
+  \item Whether cuBLAS/cuBLASLt supports complex FP16/BF16 strided batch, for an extra like-for-like point.
+  \item Per-channel versus per-tensor FP8 scales: CUTLASS \texttt{scale\_a/b} are per GEMM, so per-channel scales across the $L$ batch need a per-row or per-batch epilogue (or a grouped/pointer-array GEMM).
+  \item Whether conversion to FP16/FP8 is fused into the ingest reorder kernel or done as a separate pass, and how its cost is reported.
+  \item Name the reference's math mode in benchmark records (\texttt{PEDANTIC}, toolkit, driver) so results are traceable.
+\end{todo}
+
+\section*{References}
+\begin{itemize}
+  \item CUTLASS v4.8.1: \path{include/cutlass/{tfloat32,half,bfloat16,float8,numeric_conversion}.h}, \path{include/cutlass/gemm/collective/builders/sm90_gmma_builder.inl}, \path{include/cutlass/gemm/collective/sm90_mma_tma_gmma_ss_warpspecialized_fp8.hpp}, \path{include/cutlass/gemm/collective/fp8_accumulation.hpp}, \path{include/cutlass/gemm/dispatch_policy.hpp}, \path{include/cutlass/epilogue/fusion/operations.hpp}. \url{https://github.com/NVIDIA/cutlass}
+  \item CUTLASS examples: \path{examples/48_hopper_warp_specialized_gemm} (TF32/FP16), \path{examples/54_hopper_fp8_warp_specialized_gemm} (FP8 with scales).
+  \item cuBLAS and cuBLASLt documentation (compute types, \texttt{cublasLtMatmul} FP8 requirements): \url{https://docs.nvidia.com/cuda/cublas/}
+  \item PTX ISA, \texttt{wgmma} and \texttt{cvt} (rounding and \texttt{satfinite}): \url{https://docs.nvidia.com/cuda/parallel-thread-execution/}
+  \item N.~J.~Higham, \emph{Accuracy and Stability of Numerical Algorithms}, 2nd ed., SIAM, 2002 (\S3.1 inner-product bounds, $\gamma_n$).
+  \item Higham, 1992, stability of the 3M method (\texttt{higham1992complex} in \texttt{references.bib}).
+\end{itemize}
+
+\end{document}
