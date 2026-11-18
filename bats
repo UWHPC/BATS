@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   echo "Usage: ./bats {build|run|test} [--arch <sm>]" >&2
-  echo "  --arch <sm>  CUDA architecture to build for (default 90a, e.g. 89 or native)" >&2
+  echo "  --arch <sm>  Override the CUDA architecture (use native for the local GPU)" >&2
   exit 2
 }
 
@@ -13,10 +13,14 @@ case "$action" in
   *) usage ;;
 esac
 
-arch=90a
+arch_args=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --arch) [[ $# -ge 2 ]] || usage; arch=$2; shift 2 ;;
+    --arch)
+      [[ $# -ge 2 ]] || usage
+      arch_args=("-DCMAKE_CUDA_ARCHITECTURES=$2")
+      shift 2
+      ;;
     *) usage ;;
   esac
 done
@@ -31,7 +35,7 @@ fi
 
 cmake -S "$root" -B "$build_dir" \
   -DCMAKE_CXX_COMPILER=g++-15 \
-  -DCMAKE_CUDA_ARCHITECTURES="$arch"
+  "${arch_args[@]}"
 cmake --build "$build_dir" --parallel
 
 case "$action" in

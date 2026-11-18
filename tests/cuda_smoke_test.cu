@@ -1,49 +1,46 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cuda_runtime.h>
+#include <xpu/buffer.hpp>
 
-#include <vector>
+#include <algorithm>
+#include <array>
+#include <ranges>
 
 namespace {
 
-__global__ void add_one(int *data, int n) {
-  const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
-  if (i < n) {
-    data[i] += 1;
+__global__ auto write_sequence(xpu::buffer_view<unsigned int> values) -> void {
+  const auto index{blockIdx.x * blockDim.x + threadIdx.x};
+  if (index < values.count()) {
+    values[index] = index + 1u;
   }
 }
 
-} // namespace
+}
 
-// Checks that device code compiled for this build's target runs on the GPU.
-// Skipped on machines without a GPU (e.g. CI).
 TEST_CASE("Kernel runs on device", "[cuda][smoke]") {
-  int device_count = 0;
-  if (cudaGetDeviceCount(&device_count) != cudaSuccess || device_count == 0) {
+  auto device_count{0};
+  const auto device_status{cudaGetDeviceCount(&device_count)};
+  if (device_status == cudaErrorNoDevice ||
+      device_status == cudaErrorInsufficientDriver) {
+    SKIP("No CUDA device available");
+  }
+  REQUIRE(device_status == cudaSuccess);
+  if (device_count == 0) {
     SKIP("No CUDA device available");
   }
 
-  constexpr int n = 1000;
-  std::vector<int> host(n, 41);
+  constexpr auto count{1000u};
+  constexpr auto threads_per_block{256u};
+  constexpr auto block_count{(count + threads_per_block - 1u) /
+                             threads_per_block};
+  auto device{xpu::buffer<unsigned int>{count}};
+  std::array<unsigned int, count> host{};
 
-  int *device = nullptr;
-  REQUIRE(cudaMalloc(&device, n * sizeof(int)) == cudaSuccess);
-  REQUIRE(cudaMemcpy(device, host.data(), n * sizeof(int),
-                     cudaMemcpyHostToDevice) == cudaSuccess);
+  write_sequence<<<block_count, threads_per_block>>>(device.view());
+  REQUIRE(cudaGetLastError() == cudaSuccess);
+  REQUIRE(cudaMemcpy(host.data(), device.data(), count * sizeof(unsigned int),
+                     cudaMemcpyDeviceToHost) == cudaSuccess);
 
-  add_one<<<(n + 255) / 256, 256>>>(device, n);
-  const cudaError_t launch = cudaGetLastError();
-  INFO(cudaGetErrorString(launch)
-       << " (a 'no kernel image' error means the GPU does not match "
-          "CMAKE_CUDA_ARCHITECTURES)");
-  CHECK(launch == cudaSuccess);
-  CHECK(cudaDeviceSynchronize() == cudaSuccess);
-
-  CHECK(cudaMemcpy(host.data(), device, n * sizeof(int),
-                   cudaMemcpyDeviceToHost) == cudaSuccess);
-  CHECK(cudaFree(device) == cudaSuccess);
-
-  for (int value : host) {
-    REQUIRE(value == 42);
-  }
+  REQUIRE(std::ranges::equal(host, std::views::iota(1u, count + 1u)));
 }
