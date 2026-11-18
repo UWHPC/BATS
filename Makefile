@@ -9,13 +9,13 @@
 #
 # Settings, passed on the command line or as env vars:
 #   BATS_TARGET   backend to build for (default CUDA; CPU is not supported)
-#   BATS_ARCH     CUDA architecture (default 90a)
+#   BATS_ARCH     CUDA architecture, e.g. 89 or native (default: CMake's)
 #   BUILD_TYPE    CMake build type (default Release)
 #   CXX_COMPILER  host C++ compiler (default g++-15)
 #   CMAKE_ARGS    extra arguments passed to the CMake configure step
 
 BATS_TARGET  ?= CUDA
-BATS_ARCH    ?= 90a
+BATS_ARCH    ?=
 BUILD_TYPE   ?= Release
 # Not CXX: GNU Make predefines CXX as g++, so `?=` would never apply.
 CXX_COMPILER ?= g++-15
@@ -25,7 +25,8 @@ LATEXMK      ?= latexmk
 # The target is checked when building rather than here, so tasks that do not
 # build (docs, clean) still work with any BATS_TARGET set.
 ifeq ($(BATS_TARGET),CUDA)
-  CMAKE_TARGET_ARGS := -DCMAKE_CUDA_ARCHITECTURES=$(BATS_ARCH)
+  # Unset leaves the architecture to CMake (or the build tree's cached value).
+  CMAKE_TARGET_ARGS := $(if $(BATS_ARCH),-DCMAKE_CUDA_ARCHITECTURES=$(BATS_ARCH))
 else ifeq ($(BATS_TARGET),CPU)
   TARGET_ERROR := BATS_TARGET=CPU is not supported yet: BATS is CUDA-only for now
 else
@@ -64,7 +65,7 @@ run: build
 	./$(BUILD_DIR)/bats
 
 test: build
-	ctest --test-dir $(BUILD_DIR) --output-on-failure
+	ctest --test-dir $(BUILD_DIR) --output-on-failure --no-tests=error
 
 # Any .tex file with a \documentclass is a document; \input'd sections are
 # not. Paths are relative to docs/.

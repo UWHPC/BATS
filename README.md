@@ -1,33 +1,23 @@
 # BATS: Beamforming Across Tensor-core Systems
 
-Communication-aware distributed beamforming on GPU tensor cores across multiple GPUs and nodes.
+BATS (Beamforming Across Tensor-core Systems) is a research project for beamforming on distributed NVIDIA tensor cores. Forming beams from channelized sensor samples and complex steering weights takes one matrix multiplication per frequency channel.
 
-## Build and run
+## Build and test
 
-From the project root:
+Use Linux or WSL2 with CMake 3.25+, `g++-15`, and CUDA 13.4+ with CCCL headers.
 
 ```sh
+git submodule update --init --recursive
 make build   # build (the default task)
 make run     # build, then run
 make test    # build, then run the tests
-make docs    # build the LaTeX docs (PDFs go in a build/ folder beside each)
 make clean   # remove all build output
 ```
 
-BATS is CUDA-only and requires CUDA 13.4 or later and g++-15. Builds target
-Hopper (`sm_90a`) by default. To build and test on another GPU, pass its
-architecture, e.g. `make test BATS_ARCH=89` for an RTX 40 series card, or
-`BATS_ARCH=native` to detect the local GPU. Hopper-only kernels will not run on
-other architectures.
+Use `make test BATS_ARCH=native` to target your local GPU. Without `BATS_ARCH`, a fresh build uses CMake's default architecture. Device tests skip when CUDA has no device available. The build goes in `build/cuda/`; run `make help` for the other settings.
 
-The build goes in `build/cuda/`. Run `make help` for the other settings
-(`BATS_TARGET`, `BUILD_TYPE`, `CXX_COMPILER`, `CMAKE_ARGS`). The current
-Hello World program does not yet perform GPU work.
+## Documentation
 
-Tests use Catch2 and run through CTest. Add test sources to
-`tests/CMakeLists.txt`; tests that need a GPU skip themselves on machines
-without one. Pass `CMAKE_ARGS=-DBATS_BUILD_TESTS=OFF` to skip building the
-tests.
+`make docs` builds a PDF for every `.tex` file under `docs/` that has a `\documentclass`, into a `build/` folder beside each document. It needs `latexmk` and `biber`.
 
-`make docs` builds every `.tex` file under `docs/` that has a `\documentclass`
-and needs `latexmk` and `biber`.
+- [Technical specification](docs/technical-spec/main.tex)
