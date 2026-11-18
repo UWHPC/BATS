@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     # GitHub-hosted runners have no GPU: this only checks that the CUDA code
-    # compiles for Hopper. Run tests locally with ./bats test.
+    # compiles for Hopper. Run tests locally with make test.
     name: CUDA build (sm_90a)
     runs-on: ubuntu-26.04
 
@@ -24,11 +24,5 @@ jobs:
           sudo apt-get install -y --no-install-recommends cuda-nvcc-13-4 cuda-cudart-dev-13-4
           echo "/usr/local/cuda-13.4/bin" >> "$GITHUB_PATH"
 
-      - name: Configure
-        run: >
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_CXX_COMPILER=g++-15
-          -DCMAKE_CUDA_ARCHITECTURES=90a
-
       - name: Build
-        run: cmake --build build --parallel
+        run: make build BATS_ARCH=90a
