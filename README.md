@@ -14,7 +14,7 @@ make test    # build, then run the tests
 make clean   # remove all build output
 ```
 
-Use `make test BATS_ARCH=native` to target your local GPU. Without `BATS_ARCH`, a fresh build uses CMake's default architecture. Device tests skip when CUDA has no device available. The build goes in `build/cuda/`; run `make help` for the other settings.
+Use `make test BATS_ARCH=native` to target your local GPU. Without `BATS_ARCH`, a fresh build uses CMake's default architecture. Device tests skip when CUDA has no device available. The build goes in `build/cuda/`; the other settings are listed at the top of the `Makefile`.
 
 ## Documentation
 

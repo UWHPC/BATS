@@ -46,10 +46,7 @@ ifeq ($(origin CUDACXX),undefined)
 endif
 
 .DEFAULT_GOAL := build
-.PHONY: build run test docs clean help
-
-help:
-	@sed -n '2,15s/^# \{0,1\}//p' $(firstword $(MAKEFILE_LIST))
+.PHONY: build run test docs clean
 
 # Configure runs every time so that changed settings (e.g. BATS_ARCH) take
 # effect; it is a fast no-op when nothing has changed.
