@@ -3,8 +3,11 @@
 #   make build    configure and build the library, tests and demos
 #   make run      build, then run the main entrypoint
 #   make test     build, then run the tests
-#   make docs     build a PDF for every LaTeX document under docs/, into a
-#                 build/ folder beside each document
+#   make docs     build a PDF next to every LaTeX document under docs/, with
+#                 temporary files in a build/ folder beside each document
+#   make docs/<path>  build one document, named by its path without .tex
+#                 (e.g. docs/technical-spec/main), or every document under a
+#                 folder (e.g. docs/one-pager)
 #   make clean    remove all build output
 #
 # Settings, passed on the command line or as env vars:
@@ -64,19 +67,35 @@ run: build
 test: build
 	ctest --test-dir $(BUILD_DIR) --output-on-failure --no-tests=error
 
-# Any .tex file with a \documentclass is a document; \input'd sections are
-# not. Paths are relative to docs/.
-DOC_SRCS := $(shell cd $(DOCS_DIR) && grep -rl --include='*.tex' '^[[:space:]]*\\documentclass' . | sed 's|^\./||' | sort)
+# Discover valid LaTeX documents by finding '\documentclass' specification in the file.
+DOC_SRCS := $(shell grep -rl --include='*.tex' '^[[:space:]]*\\documentclass' $(DOCS_DIR) | sort)
 
-# latexmk runs from docs/ so it reads docs/.latexmkrc, which sets the output
-# directory, and it tracks each document's inputs and skips unchanged ones.
-# -cd runs each document from its own directory so relative paths such as
-# \input{sections/...} resolve; the .latexmkrc output directory is relative,
-# so docs/a/b.tex builds to docs/a/build/b.pdf.
-docs:
-	cd $(DOCS_DIR) && $(LATEXMK) -pdf -cd -interaction=nonstopmode -halt-on-error \
-	  $(DOC_SRCS)
+DOC_AUX := build
+
+LATEXMK_FLAGS := -pdf -cd -outdir=. -auxdir=$(DOC_AUX) -interaction=nonstopmode -halt-on-error
+
+DOC_TARGETS := $(DOC_SRCS:.tex=)
+DOC_PDFS := $(addsuffix .pdf,$(DOC_TARGETS))
+
+DOC_DIRS := $(foreach d,$(shell find $(DOCS_DIR) -mindepth 1 -name $(DOC_AUX) -prune -o -type d -print),$(if $(filter $d/%,$(DOC_TARGETS)),$d))
+DOC_DIR_TARGETS := $(DOC_DIRS) $(addsuffix /,$(DOC_DIRS))
+
+DOC_DEPS := $(filter-out $(DOC_PDFS),$(shell find $(DOCS_DIR) -name $(DOC_AUX) -prune -o -type f -print))
+
+.PHONY: $(DOC_TARGETS) $(DOC_DIR_TARGETS)
+.DELETE_ON_ERROR:
+
+docs: $(DOC_PDFS)
+
+$(DOC_TARGETS): %: %.pdf
+
+$(foreach d,$(DOC_DIRS),$(eval $d $d/: $(filter $d/%,$(DOC_PDFS))))
+
+# Build PDF with latexmk, then touch to make file current.
+$(DOCS_DIR)/%.pdf: $(DOCS_DIR)/%.tex $(DOC_DEPS)
+	$(LATEXMK) $(LATEXMK_FLAGS) $<
+	touch $@
 
 clean:
 	rm -rf build
-	find $(DOCS_DIR) -type d -name build -prune -exec rm -rf {} +
+	find $(DOCS_DIR) -type d -name $(DOC_AUX) -prune -exec rm -rf {} +

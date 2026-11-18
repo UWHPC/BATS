@@ -20,4 +20,4 @@ Use `make test BATS_ARCH=native` to target your local GPU. Without `BATS_ARCH`, 
 
 - [Technical specification](docs/technical-spec/main.tex)
 
-To build the LaTeX documentation, run `make docs`. This builds a PDF for every `.tex` file under `docs/` that has a `\documentclass`, into a `build/` folder beside each document. Note that this requires `latexmk` and `biber`.
+To build the LaTeX documentation, run `make docs`. This builds a PDF next to every `.tex` file under `docs/`. To build a single document, name its path without `.tex`, e.g. `make docs/technical-spec/main`. To build every document under a folder, name the folder, e.g. `make docs/one-pager`. Building docs require `latexmk` and `biber`.
