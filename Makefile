@@ -93,7 +93,9 @@ $(foreach d,$(DOC_DIRS),$(eval $d $d/: $(filter $d/%,$(DOC_PDFS))))
 
 # Build PDF with latexmk, then touch to make file current.
 $(DOCS_DIR)/%.pdf: $(DOCS_DIR)/%.tex $(DOC_DEPS)
-	$(LATEXMK) $(LATEXMK_FLAGS) $<
+	epoch=$${SOURCE_DATE_EPOCH:-$$(git log -1 --format=%ct -- $(@D) 2>/dev/null)}; \
+	SOURCE_DATE_EPOCH=$${epoch:-$$(date +%s)} FORCE_SOURCE_DATE=1 \
+	  $(LATEXMK) $(LATEXMK_FLAGS) $<
 	touch $@
 
 clean:
