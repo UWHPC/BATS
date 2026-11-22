@@ -10,6 +10,11 @@ if(NOT DEFINED CMAKE_CUDA_HOST_COMPILER)
   set(CMAKE_CUDA_HOST_COMPILER "${BATS_GXX15}" CACHE FILEPATH "CUDA host compiler")
 endif()
 
+# TF32 tensor cores (complex_gemm) need sm_80+; --arch still overrides this
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+  set(CMAKE_CUDA_ARCHITECTURES 80)
+endif()
+
 project(BATS LANGUAGES CXX CUDA)
 
 if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 13.4)
@@ -29,6 +34,12 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_EXTENSIONS OFF)
 
 include(cmake/Dependencies.cmake)
+
+# Proof-of-concept complex GEMM on tensor cores (issue #6).
+add_library(bats_core src/complex_gemm.cu)
+add_library(bats::core ALIAS bats_core)
+target_include_directories(bats_core PUBLIC include)
+target_link_libraries(bats_core PUBLIC CUDA::cudart)
 
 add_executable(bats src/main.cpp)
 target_include_directories(bats PRIVATE include)
