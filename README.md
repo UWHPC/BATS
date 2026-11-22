@@ -8,13 +8,16 @@ Use Linux or WSL2 with CMake 3.25+, `g++-15`, and CUDA 13.4+ with CCCL headers.
 
 ```sh
 git submodule update --init --recursive
-./bats build
-./bats run
-./bats test
+make build   # build (the default task)
+make run     # build, then run
+make test    # build, then run the tests
+make clean   # remove all build output
 ```
 
-Use `./bats test --arch native` to target your local GPU. Without `--arch`, a fresh build uses CMake's default architecture. Device tests skip when CUDA has no device available.
+Use `make test BATS_ARCH=native` to target your local GPU. Without `BATS_ARCH`, a fresh build uses CMake's default architecture. Device tests skip when CUDA has no device available. The build goes in `build/cuda/`; the other settings are listed at the top of the `Makefile`.
 
 ## Documentation
 
 - [Technical specification](docs/technical-spec/main.tex)
+
+To build the LaTeX documentation, run `make docs`. This builds a PDF next to every `.tex` file under `docs/`. To build a single document, name its path without `.tex`, e.g. `make docs/technical-spec/main`. To build every document under a folder, name the folder, e.g. `make docs/one-pager`. Building docs require `latexmk` and `biber`.
