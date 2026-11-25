@@ -1,0 +1,23 @@
+# clangd settings. CMake sets C++23 for the build, but clangd does not read
+# CMake, and without a compile database it falls back to clang's default
+# standard (gnu++17). These rules make every file parse as C++23.
+
+CompileFlags:
+  Add: [-std=c++23]
+---
+# CUDA sources: parse as CUDA and drop nvcc-only flags clang does not accept.
+If:
+  PathMatch: .*\.(cu|cuh)
+CompileFlags:
+  Add: [-xcuda, -std=c++23]
+  Remove:
+    - --expt-relaxed-constexpr
+    - --expt-extended-lambda
+    - -forward-unknown-to-host-compiler
+    - --generate-code*
+    - -gencode*
+    - -arch*
+    - -Xcompiler*
+    - -Xptxas*
+    - --options-file
+    - -rdc*
